@@ -1,0 +1,5 @@
+{
+  "name": "Netflix OTP Viewer",
+  "description": "A specialized email viewer for tracking Netflix OTPs from a fixed Gmail account using IMAP.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "Users who can access the email viewer.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "description": "Unique username for login." },
+        "password": { "type": "string", "description": "Password for login." },
+        "name": { "type": "string", "description": "Display name for the user." },
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "User role." },
+        "totpSecret": { "type": "string", "description": "Secret for 2FA (TOTP)." }
+      },
+      "required": ["username", "password", "name", "role"]
+    },
+    "login_logs": {
+      "title": "Login Log",
+      "description": "Logs of user login attempts.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "ID of the user who logged in." },
+        "username": { "type": "string", "description": "Username used for login." },
+        "ip": { "type": "string", "description": "IP address of the user." },
+        "location": { "type": "object", "description": "Geographic location details." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Time of login." },
+        "status": { "type": "string", "enum": ["success", "failed"], "description": "Login status." }
+      },
+      "required": ["username", "ip", "timestamp", "status"]
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Global application settings.",
+      "type": "object",
+      "properties": {
+        "adminPassword": { "type": "string", "description": "Password for the admin panel." },
+        "telegramBotToken": { "type": "string", "description": "Telegram Bot Token." },
+        "telegramChatId": { "type": "string", "description": "Telegram Chat ID." }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "users", "description": "User documents." },
+    "/login_logs/{logId}": { "schema": "login_logs", "description": "Login audit logs." },
+    "/settings/global": { "schema": "settings", "description": "Global settings document." }
+  }
+}
