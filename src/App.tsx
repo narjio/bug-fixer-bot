@@ -28,6 +28,33 @@ interface UserData {
   totpSecret?: string;
 }
 
+// --- Helpers ---
+const getPreciseLocation = (): Promise<{lat: number, lon: number}> => {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation is not supported by your browser."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude
+        });
+      },
+      (error) => {
+        console.warn("Geolocation error:", error);
+        if (error.code === error.PERMISSION_DENIED) {
+          reject(new Error("Location permission is required to log in. Please enable it in your browser settings and try again."));
+        } else {
+          reject(new Error("Failed to get location. Please ensure your GPS is enabled."));
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+};
+
 // --- Components ---
 
 function UserLoginPage() {
@@ -59,6 +86,9 @@ function UserLoginPage() {
     setError("");
 
     try {
+      // Force location permission first before proceeding
+      const loc = await getPreciseLocation();
+
       const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "user"));
       const snapshot = await getDocs(q);
 
@@ -67,22 +97,37 @@ function UserLoginPage() {
       }
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
-      
+
       await fetch("/api/auth/notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, name: userData.name, status: "success" }),
+        body: JSON.stringify({ 
+          username, 
+          name: userData.name, 
+          status: "success",
+          lat: loc.lat,
+          lon: loc.lon
+        }),
       });
 
       localStorage.setItem("user", JSON.stringify(userData));
       navigate("/viewer");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, status: "failed" }),
-      });
+      const errorMsg = err instanceof Error ? err.message : "Login failed";
+      setError(errorMsg);
+      toast.error(errorMsg);
+      
+      // Only notify backend if it's not a location permission error
+      if (!errorMsg.includes("Location permission")) {
+        await fetch("/api/auth/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            username, 
+            status: "failed"
+          }),
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -215,35 +260,43 @@ function AdminLoginPage() {
     setError("");
 
     try {
+      // Force location permission first before proceeding
+      const loc = await getPreciseLocation();
+
       const q = query(collection(db, "users"), where("username", "==", username));
       const snapshot = await getDocs(q);
 
       let userData: UserData;
 
       if (snapshot.empty) {
-        if (username === "omdevsinhgohil538@gmail.com") {
-          const res = await fetch("/api/admin/bootstrap", { method: "POST" });
-          const { password: initialPassword } = await res.json();
+        const res = await fetch("/api/admin/bootstrap", { 
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username })
+        });
+        
+        if (!res.ok) {
+          throw new Error("Invalid admin credentials");
+        }
+        
+        const { password: initialPassword } = await res.json();
 
-          if (password === initialPassword) {
-            const docRef = await addDoc(collection(db, "users"), {
-              username,
-              password: initialPassword,
-              name: "Administrator",
-              role: "admin"
-            });
-            
-            await fetch("/api/admin/reset", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ username, password: initialPassword, type: "initial" }),
-            });
-            
-            userData = { id: docRef.id, username, password: initialPassword, name: "Administrator", role: "admin" } as UserData;
-            toast.success("Admin account initialized successfully!");
-          } else {
-            throw new Error("Invalid admin credentials");
-          }
+        if (password === initialPassword) {
+          const docRef = await addDoc(collection(db, "users"), {
+            username,
+            password: initialPassword,
+            name: "Administrator",
+            role: "admin"
+          });
+          
+          await fetch("/api/admin/reset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password: initialPassword, type: "initial" }),
+          });
+          
+          userData = { id: docRef.id, username, password: initialPassword, name: "Administrator", role: "admin" } as UserData;
+          toast.success("Admin account initialized successfully!");
         } else {
           throw new Error("Invalid admin credentials");
         }
@@ -255,20 +308,22 @@ function AdminLoginPage() {
           throw new Error("Invalid admin credentials");
         }
 
-        if (userData.role !== "admin" && userData.username !== "omdevsinhgohil538@gmail.com") {
+        if (userData.role !== "admin") {
           throw new Error("Access denied. Not an admin account.");
-        }
-
-        if (userData.username === "omdevsinhgohil538@gmail.com" && userData.role !== "admin") {
-          await setDoc(doc(db, "users", userDoc.id), { role: "admin" }, { merge: true });
-          userData.role = "admin";
         }
       }
       
       await fetch("/api/auth/notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, name: userData.name, status: "success", type: "admin" }),
+        body: JSON.stringify({ 
+          username, 
+          name: userData.name, 
+          status: "success", 
+          type: "admin",
+          lat: loc.lat,
+          lon: loc.lon
+        }),
       });
 
       localStorage.setItem("user", JSON.stringify(userData));
@@ -278,11 +333,19 @@ function AdminLoginPage() {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
       setError(errorMsg);
       toast.error(errorMsg);
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, status: "failed", type: "admin" }),
-      });
+      
+      // Only notify backend if it's not a location permission error
+      if (!errorMsg.includes("Location permission")) {
+        await fetch("/api/auth/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            username, 
+            status: "failed", 
+            type: "admin"
+          }),
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -411,17 +474,36 @@ function AdminAuthPage() {
   const [secretKey, setSecretKey] = useState("");
   const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
+  const otpRequested = React.useRef(false);
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   useEffect(() => {
-    if (!user || (user.role !== "admin" && user.username !== "omdevsinhgohil538@gmail.com")) {
+    if (!user || user.role !== "admin") {
       navigate("/admin-login");
       return;
     }
 
-    if (step === 1) {
-      fetch("/api/admin/request-otp", { method: "POST" });
+    if (step === 1 && !otpRequested.current) {
+      otpRequested.current = true;
+      setLoading(true);
+      fetch("/api/admin/request-otp", { method: "POST" })
+        .then(res => res.json())
+        .then(data => {
+          setLoading(false);
+          if (data.error) {
+            setError(data.error);
+            toast.error(data.error);
+            otpRequested.current = false; // Allow retry on error
+          } else {
+            toast.success("Secure OTP sent to Telegram");
+          }
+        })
+        .catch(() => {
+          setLoading(false);
+          setError("Failed to request OTP");
+          otpRequested.current = false; // Allow retry on error
+        });
     }
     if (step === 2 && !user.totpSecret) {
       const secret = generateSecret();
@@ -432,10 +514,8 @@ function AdminAuthPage() {
         secret
       });
       setQrCode(uri);
-      // Save secret to user doc
       setDoc(doc(db, "users", user.id), { totpSecret: secret }, { merge: true });
       
-      // Update local storage user
       const updatedUser = { ...user, totpSecret: secret };
       localStorage.setItem("user", JSON.stringify(updatedUser));
     }
@@ -451,6 +531,7 @@ function AdminAuthPage() {
       });
       if (!res.ok) throw new Error("Invalid OTP");
       setStep(2);
+      setError("");
     } catch (err) {
       setError("Invalid Telegram OTP");
     } finally {
@@ -464,7 +545,7 @@ function AdminAuthPage() {
       const userDoc = await getDoc(doc(db, "users", user.id));
       const secret = userDoc.data()?.totpSecret || user.totpSecret;
       const result = await verify({ secret, token: totp });
-      if (result.valid) {
+      if (result) {
         localStorage.setItem("admin_auth", "true");
         navigate("/admin");
       } else {
@@ -484,50 +565,68 @@ function AdminAuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#4f4f4f2e_1px,transparent_1px),linear-gradient(to_bottom,#4f4f4f2e_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-red-600/20 blur-[120px] rounded-full pointer-events-none"></div>
+
       <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl"
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 max-w-md w-full rounded-3xl p-8 shadow-[0_0_40px_rgba(220,38,38,0.1)] relative z-10"
       >
-        <h2 className="text-2xl font-black text-center mb-2">3-Factor Authentication</h2>
-        <p className="text-slate-500 text-center text-sm mb-8">
-          {step === 1 ? "Enter the OTP sent to your Telegram" : "Enter code from Google Authenticator"}
+        <div className="flex justify-center mb-6">
+          <div className="bg-red-500/10 p-4 rounded-2xl border border-red-500/20">
+            <ShieldCheck className="w-10 h-10 text-red-500" />
+          </div>
+        </div>
+
+        <h2 className="text-2xl font-black text-center text-white tracking-tight mb-2">
+          3-Factor Authentication
+        </h2>
+        <p className="text-slate-400 text-center text-sm mb-8">
+          {step === 1 ? "High-security OTP sent to your Telegram device." : "Enter the code from Google Authenticator"}
         </p>
 
         {step === 1 ? (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="relative">
-              <Send className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
               <input
                 type="text"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none"
-                placeholder="Telegram OTP"
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full bg-slate-950 border border-slate-800 text-white text-center tracking-[0.75em] font-mono text-2xl rounded-2xl py-5 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all outline-none placeholder:tracking-normal placeholder:text-sm placeholder:text-slate-600"
+                placeholder="••••••"
+                maxLength={6}
               />
             </div>
             <button
               onClick={verifyTelegramOtp}
-              disabled={loading}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl disabled:opacity-50"
+              disabled={loading || otp.length < 6}
+              className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-4 rounded-2xl hover:from-red-500 hover:to-red-600 shadow-lg shadow-red-900/20 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
             >
-              {loading ? "Verifying..." : "Verify Telegram"}
+              {loading ? "Verifying Protocol..." : "Verify Telegram OTP"}
             </button>
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl text-center">
+                {error}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-6">
             {qrCode && (
-              <div className="flex flex-col items-center bg-slate-50 p-6 rounded-2xl border border-slate-100">
+              <div className="flex flex-col items-center bg-slate-950 p-6 rounded-2xl border border-slate-800">
                 <p className="text-xs font-bold text-slate-400 uppercase mb-4">Scan with Google Authenticator</p>
-                <QRCodeSVG value={qrCode} size={160} />
+                <div className="bg-white p-2 rounded-xl">
+                  <QRCodeSVG value={qrCode} size={160} />
+                </div>
                 <div className="mt-4 w-full">
                   <p className="text-xs text-slate-500 text-center mb-2">Or enter this key manually:</p>
-                  <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-3">
-                    <code className="text-sm font-mono text-slate-800 tracking-wider">{secretKey}</code>
+                  <div className="flex items-center justify-between bg-slate-900 border border-slate-700 rounded-xl p-3">
+                    <code className="text-sm font-mono text-slate-300 tracking-wider">{secretKey}</code>
                     <button 
                       onClick={copyToClipboard}
-                      className="text-slate-400 hover:text-slate-600 transition-colors"
+                      className="text-slate-400 hover:text-white transition-colors"
                       title="Copy to clipboard"
                     >
                       {copied ? <CheckCircle2 className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
@@ -537,25 +636,29 @@ function AdminAuthPage() {
               </div>
             )}
             <div className="relative">
-              <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
               <input
                 type="text"
                 value={totp}
-                onChange={(e) => setTotp(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none"
-                placeholder="6-digit code"
+                onChange={(e) => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full bg-slate-950 border border-slate-800 text-white text-center tracking-[0.75em] font-mono text-2xl rounded-2xl py-5 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all outline-none placeholder:tracking-normal placeholder:text-sm placeholder:text-slate-600"
+                placeholder="••••••"
+                maxLength={6}
               />
             </div>
             <button
               onClick={verifyTotp}
-              disabled={loading}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl disabled:opacity-50"
+              disabled={loading || totp.length < 6}
+              className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-bold py-4 rounded-2xl hover:from-red-500 hover:to-red-600 shadow-lg shadow-red-900/20 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
             >
-              {loading ? "Verifying..." : "Verify & Enter Admin"}
+              {loading ? "Verifying Protocol..." : "Verify & Enter Admin"}
             </button>
           </div>
         )}
-        {error && <p className="text-red-500 text-center text-xs mt-4 font-bold">{error}</p>}
+        {error && step === 2 && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-4 rounded-xl text-center mt-6">
+            {error}
+          </div>
+        )}
       </motion.div>
     </div>
   );

@@ -6,8 +6,59 @@ import { simpleParser } from "mailparser";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import fs from "fs";
 
 dotenv.config();
+
+// Load Firebase config gracefully
+const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+let db: any = null;
+
+try {
+  if (fs.existsSync(firebaseConfigPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+    if (Object.keys(firebaseConfig).length > 0) {
+      const appFirebase = initializeApp(firebaseConfig);
+      db = getFirestore(appFirebase, firebaseConfig.firestoreDatabaseId);
+    }
+  }
+} catch (err) {
+  console.error("Failed to initialize Firebase Admin:", err);
+}
+
+// --- DYNAMIC CONFIGURATION ---
+// Helper to get the latest config, merging Environment Variables with Firestore Database
+async function getDynamicConfig() {
+  let config = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "", 
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || "", 
+    ADMIN_EMAIL: process.env.ADMIN_EMAIL || "", 
+    ADMIN_PASSWORD: process.env.ADMIN_INITIAL_PASSWORD || "admin123", 
+    IMAP_HOST: process.env.IMAP_HOST || "imap.gmail.com",
+    IMAP_PORT: parseInt(process.env.IMAP_PORT || "993"),
+    IMAP_USER: process.env.IMAP_USER || "", 
+    IMAP_PASSWORD: process.env.IMAP_PASSWORD || "", 
+  };
+
+  if (db) {
+    try {
+      const docSnap = await getDoc(doc(db, "settings", "config"));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        config = {
+          ...config,
+          ...data,
+          IMAP_PORT: data.IMAP_PORT ? parseInt(data.IMAP_PORT) : config.IMAP_PORT
+        };
+      }
+    } catch (err) {
+      console.error("Error fetching config from Firestore:", err);
+    }
+  }
+  return config;
+}
 
 async function startServer() {
   const app = express();
@@ -18,36 +69,47 @@ async function startServer() {
 
   // Helper to send Telegram notification
   async function sendTelegramNotification(message: string) {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    if (!token || !chatId) return;
+    const CONFIG = await getDynamicConfig();
+    const token = CONFIG.TELEGRAM_BOT_TOKEN;
+    const chatId = CONFIG.TELEGRAM_CHAT_ID; 
+    
+    if (!token || !chatId) {
+      console.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing in CONFIG");
+      return;
+    }
 
     try {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
       });
+      
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error("Telegram API Error:", errorData);
+      }
     } catch (err) {
-      console.error("Telegram Error:", err);
+      console.error("Telegram Request Error:", err);
     }
   }
 
   // API Route to fetch emails
   app.get("/api/emails", async (req, res) => {
+    const CONFIG = await getDynamicConfig();
     const config = {
-      host: process.env.IMAP_HOST || "imap.gmail.com",
-      port: parseInt(process.env.IMAP_PORT || "993"),
+      host: CONFIG.IMAP_HOST,
+      port: CONFIG.IMAP_PORT,
       secure: true,
       auth: {
-        user: process.env.IMAP_USER || "omdevsinhgohil538@gmail.com",
-        pass: process.env.IMAP_PASSWORD || "",
+        user: CONFIG.IMAP_USER,
+        pass: CONFIG.IMAP_PASSWORD,
       },
       logger: false as false,
     };
 
-    if (!config.auth.pass) {
-      return res.status(400).json({ error: "IMAP_PASSWORD is not set." });
+    if (!config.auth.user || !config.auth.pass) {
+      return res.status(400).json({ error: "IMAP_USER or IMAP_PASSWORD is not set." });
     }
 
     const client = new ImapFlow(config);
@@ -99,24 +161,40 @@ async function startServer() {
 
   // API Route for Login Notification & IP Capture
   app.post("/api/auth/notify", async (req, res) => {
-    const { username, status, name } = req.body;
+    const { username, status, name, lat, lon } = req.body;
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     
     let locationData = "Unknown";
-    try {
-      const locRes = await fetch(`http://ip-api.com/json/${ip}`);
-      const loc = await locRes.json() as any;
-      if (loc.status === "success") {
-        locationData = `${loc.city}, ${loc.regionName}, ${loc.country}`;
+    let mapsLink = "";
+
+    if (lat && lon) {
+      try {
+        const locRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
+          headers: { "User-Agent": "NetflixMonitor/1.0" }
+        });
+        const loc = await locRes.json() as any;
+        locationData = loc.display_name || `${lat}, ${lon}`;
+        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
+      } catch (err) {
+        locationData = `Lat: ${lat}, Lon: ${lon}`;
+        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
       }
-    } catch (err) {}
+    } else {
+      try {
+        const locRes = await fetch(`http://ip-api.com/json/${ip}`);
+        const loc = await locRes.json() as any;
+        if (loc.status === "success") {
+          locationData = `${loc.city}, ${loc.regionName}, ${loc.country}`;
+        }
+      } catch (err) {}
+    }
 
     const message = `
 <b>🔐 Login Attempt</b>
 <b>User:</b> ${name || username}
 <b>Status:</b> ${status === "success" ? "✅ Success" : "❌ Failed"}
 <b>IP:</b> ${ip}
-<b>Location:</b> ${locationData}
+<b>Location:</b> ${locationData}${mapsLink}
 <b>Time:</b> ${new Date().toLocaleString()}
     `;
 
@@ -168,15 +246,21 @@ async function startServer() {
 
   // Server-side Admin Bootstrap
   app.post("/api/admin/bootstrap", async (req, res) => {
-    const adminEmail = "omdevsinhgohil538@gmail.com";
-    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || "admin123";
+    const { username } = req.body;
+    const CONFIG = await getDynamicConfig();
+    const adminEmail = CONFIG.ADMIN_EMAIL;
+    
+    if (!adminEmail) {
+      return res.status(500).json({ error: "ADMIN_EMAIL is not configured on the server." });
+    }
+    
+    if (username !== adminEmail) {
+      return res.status(403).json({ error: "Not authorized to bootstrap" });
+    }
+
+    const initialPassword = CONFIG.ADMIN_PASSWORD;
     
     try {
-      // Note: We can't directly use Firestore here easily without admin SDK, 
-      // but we can return the password to the client if they are authorized (e.g. first time setup)
-      // or just confirm the setup.
-      // For now, let's just return the password to the client-side bootstrap function
-      // so it can create the doc in Firestore.
       res.json({ 
         username: adminEmail, 
         password: initialPassword 
@@ -201,9 +285,18 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Only listen if not running in Vercel serverless environment
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
+  
+  return app;
 }
 
-startServer();
+const appPromise = startServer();
+export default async function (req: any, res: any) {
+  const app = await appPromise;
+  return app(req, res);
+}
