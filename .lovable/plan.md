@@ -1,67 +1,63 @@
 
 
-## Fix Plan: Mobile View, 12hr Time, and Email Sync Issues
+## Plan: Cloudflare Workers + KV Cache to Eliminate Supabase Egress
 
-### Problems from Screenshot
-1. **Email HTML cut off on right** — Netflix email content is clipped, not fitting mobile screen. Current CSS `transform: scale(0.85)` doesn't work properly — leaves dead space and still clips.
-2. **24hr time format** — Shows "23:10:00" instead of "11:10 PM". Two places: inbox list (line 1082) and email detail view (line 1124).
-3. **New incoming emails not fetching** — IMAP sync runs every 10s but takes 25s+ per call, so it's always overlapping/blocked by `isFetchingRef`.
-4. **Not all month's emails showing** — Backend processes newest-first but re-fetches already-cached UIDs too (line 176: `orderedUids = [...uncachedUids, ...alreadyCachedUids]`), wasting time on old emails instead of focusing on new ones only.
+### Architecture
 
-### Plan
+```text
+Current (high egress):
+  User ──10s──> Supabase Edge Function ──> Supabase DB ──> User
+  (every user, every 10s = massive egress)
 
-**1. Fix mobile email HTML rendering**
-- Remove `transform: scale(0.85)` — it causes the clipping issue
-- Instead, force all tables to `width: 100% !important; max-width: 100% !important` on mobile
-- Add `table-layout: fixed` and `overflow-wrap: break-word` to prevent overflow
-- Set container width explicitly with proper padding
-
-**2. Switch to 12-hour time format**
-- Inbox list time (line 1082): Add `hour12: true` to `toLocaleTimeString`
-- Email detail date (line 1124): Use `toLocaleString` with `hour12: true` and proper India locale format like "07/04/2026, 11:10 PM"
-
-**3. Fix IMAP sync efficiency**
-- In `fetch-emails/index.ts`: Remove re-fetching of already cached UIDs (line 176) — ONLY fetch `uncachedUids`
-- This makes each sync cycle much faster since it only downloads NEW emails
-- With fewer emails to process per cycle, the 25s timeout won't be hit
-
-**4. Adjust sync interval to avoid overlap**
-- Keep 10s cache refresh (instant DB read)
-- Change IMAP sync to 15s interval instead of 10s, giving enough gap for the shorter sync to complete
-
-### Files to Change
-
-- `src/App.tsx` — Time format (2 lines), mobile CSS (remove scale, add proper table constraints), sync interval
-- `supabase/functions/fetch-emails/index.ts` — Remove re-fetching cached UIDs (line 176), only process `uncachedUids`
-
-### Technical Details
-
-Time format fix:
-```
-// Line 1082 (inbox list)
-{ hour: "2-digit", minute: "2-digit", hour12: true }
-
-// Line 1124 (email detail)  
-new Date(selectedEmail.date).toLocaleString("en-IN", { 
-  day: "2-digit", month: "2-digit", year: "numeric",
-  hour: "2-digit", minute: "2-digit", hour12: true 
-})
+New (zero Supabase egress for reads):
+  User ──10s──> Cloudflare Worker ──> KV Cache ──> User  (FREE, instant)
+                     │
+                     └── every 10s, Worker checks DB for new emails
+                         (1 single call, not per-user)
 ```
 
-Mobile CSS fix:
-```css
-@media (max-width: 480px) {
-  .gmail-style-content table { 
-    width: 100% !important; 
-    max-width: 100% !important; 
-    table-layout: fixed !important; 
-  }
-  .gmail-style-content td, .gmail-style-content th {
-    max-width: 100vw !important;
-    overflow: hidden !important;
-  }
-}
-```
+### How It Works
 
-Backend: Line 176 change from `[...uncachedUids, ...alreadyCachedUids]` to just `uncachedUids`.
+1. **Cloudflare Worker** serves as the proxy between users and email data
+2. **Cloudflare KV** stores the cached email list (free: 100K reads/day, 1K writes/day)
+3. Worker reads from KV instantly for user requests (zero Supabase egress)
+4. Worker refreshes KV from Supabase DB every 10 seconds using a stale-while-revalidate pattern — if KV data is older than 10s, it fetches fresh data from Supabase once and updates KV
+5. Multiple users hitting the Worker simultaneously = still only 1 Supabase call per 10s cycle
+6. IMAP sync continues running via Supabase Edge Function (writes to DB only — no egress to users)
+
+### Supabase Egress Impact
+- **Before**: Every user × every 10s = N × 8640 calls/day to Supabase
+- **After**: Only 1 call per 10s from Cloudflare = 8640 calls/day total, regardless of user count
+- **Savings**: ~99%+ for multi-user scenarios
+
+### What Gets Created
+
+**1. New file: `cloudflare-worker/worker.js`** (not deployed to Lovable — user deploys to Cloudflare)
+- Handles GET `/api/emails` — returns cached emails from KV
+- Handles POST `/api/emails/sync` — triggers IMAP sync via Supabase Edge Function
+- Stale-while-revalidate: if KV data > 10s old, fetch from Supabase DB in background
+- CORS headers for frontend access
+
+**2. New file: `cloudflare-worker/wrangler.toml`** — Cloudflare config with KV binding
+
+**3. Update `src/App.tsx`**
+- Change `loadCachedEmails()` to call Cloudflare Worker URL instead of Supabase
+- Change `syncFromImap()` to call Cloudflare Worker's sync endpoint
+- Add env var `VITE_CLOUDFLARE_WORKER_URL` for the Worker URL
+- Keep 10s auto-refresh interval (reads from Cloudflare = free)
+
+**4. Update `supabase/functions/fetch-emails/index.ts`**
+- No changes needed — it already handles `mode: "cache"` and `mode: "sync"` correctly
+- Cloudflare Worker will call these same endpoints
+
+### What You Need to Do (one-time setup)
+1. Create a Cloudflare account (free)
+2. Create a KV namespace called `EMAIL_CACHE`
+3. Deploy the worker with `npx wrangler deploy`
+4. Set worker environment variables: `SUPABASE_URL`, `SUPABASE_KEY`
+5. Add your Cloudflare Worker URL to Lovable as `VITE_CLOUDFLARE_WORKER_URL`
+
+### Files to Create/Edit
+- **Create**: `cloudflare-worker/worker.js`, `cloudflare-worker/wrangler.toml`
+- **Edit**: `src/App.tsx` (swap API endpoints to Cloudflare Worker URL)
 
