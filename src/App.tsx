@@ -12,9 +12,7 @@ const OTP_SERVICE_FALLBACK = {
 };
 
 function getCloudflareWorkerUrl() {
-  const url = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
-  if (url && url !== "undefined" && url !== "null") return url;
-  return ""; // empty = fallback to Supabase directly
+  return "https://netflixfetch.opgohils.workers.dev";
 }
 
 function getRuntimeValue(value: string | undefined, fallback: string) {
