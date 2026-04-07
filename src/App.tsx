@@ -1079,7 +1079,7 @@ function EmailViewer() {
                           {email.from?.split("<")[0]?.trim() || "Unknown"}
                         </span>
                         <span className="text-[10px] text-slate-400">
-                          {new Date(email.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {new Date(email.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
                         </span>
                       </div>
                       <h4 className="text-sm font-bold text-slate-900 truncate mb-1">{email.subject}</h4>
