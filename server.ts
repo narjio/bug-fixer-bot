@@ -304,7 +304,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       console.error("Error in request-otp:", err);
-      res.status(500).json({ error: "Failed to send OTP via Telegram" });
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to send OTP via Telegram" });
     }
   });
 
