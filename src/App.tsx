@@ -867,11 +867,11 @@ function EmailViewer() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const [syncing, setSyncing] = useState(false);
+  const syncIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load cached emails from DB (instant)
   const loadCachedEmails = async () => {
     try {
-      console.log("[loadCached] Loading from cache...");
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -885,7 +885,6 @@ function EmailViewer() {
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
       const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[loadCached] Got", emailList.length, "cached emails");
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
@@ -896,15 +895,14 @@ function EmailViewer() {
     }
   };
 
-  // Sync from IMAP server (background, updates cache)
+  // Sync from IMAP server (background, silent)
   const syncFromImap = async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setSyncing(true);
     try {
-      console.log("[syncIMAP] Starting IMAP sync...");
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      const timeout = setTimeout(() => controller.abort(), 50000);
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -921,17 +919,14 @@ function EmailViewer() {
       if (raw) { try { data = JSON.parse(raw); } catch {} }
       if (!res.ok) {
         const errMsg = data?.error || "Failed to sync emails.";
-        console.error("[syncIMAP] Error:", errMsg);
         setError(errMsg);
         return;
       }
-      const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[syncIMAP] Synced", emailList.length, "emails from IMAP");
-      // Reload from cache to get all emails (including previously cached ones)
+      // After IMAP sync, reload from cache to get full list
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        console.error("[syncIMAP] Timeout - will retry on next refresh");
+        console.log("[syncIMAP] Timeout - will retry next cycle");
       } else {
         console.error("[syncIMAP] Error:", err);
       }
@@ -943,35 +938,48 @@ function EmailViewer() {
 
   // Manual refresh: instant cache load + background IMAP sync
   const fetchEmails = async () => {
-    setLoading(true);
     setError(null);
-    try {
-      await loadCachedEmails();
-      // Trigger IMAP sync in background
-      syncFromImap();
-    } finally {
-      setLoading(false);
-      setCountdown(refreshIntervalSeconds);
-    }
+    await loadCachedEmails();
+    setCountdown(refreshIntervalSeconds);
+    // Trigger IMAP sync silently in background
+    syncFromImap();
   };
 
   useEffect(() => {
     // On mount: load cache instantly, then sync from IMAP
     setLoading(true);
-    loadCachedEmails().then((count) => {
+    loadCachedEmails().then(() => {
       setLoading(false);
-      // Always sync on first load
       syncFromImap();
     });
-    const interval = setInterval(() => {
+
+    // Auto-refresh from cache every 30s (instant)
+    const cacheInterval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) { syncFromImap().then(() => loadCachedEmails()); return refreshIntervalSeconds; }
+        if (prev <= 1) {
+          loadCachedEmails();
+          return refreshIntervalSeconds;
+        }
         return prev - 1;
       });
     }, 1000);
-    const handleVisibility = () => { if (document.visibilityState === "visible") { loadCachedEmails(); syncFromImap(); } };
+
+    // IMAP sync every 2 minutes (background)
+    syncIntervalRef.current = setInterval(() => {
+      syncFromImap();
+    }, 120000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadCachedEmails();
+      }
+    };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
+    return () => {
+      clearInterval(cacheInterval);
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   const copyOtp = (otp: string) => {
@@ -999,11 +1007,17 @@ function EmailViewer() {
               <span className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase leading-tight">Refresh</span>
               <span className="text-xs sm:text-sm font-mono font-bold text-red-600">{countdown}s</span>
             </div>
-            <button onClick={() => fetchEmails()} disabled={loading || syncing}
-              className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all disabled:opacity-50 active:scale-95">
-              <RefreshCw className={`w-4 h-4 ${(loading || syncing) ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">{syncing ? "Syncing..." : "Refresh"}</span>
+            <button onClick={() => fetchEmails()}
+              className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all active:scale-95">
+              <RefreshCw className="w-4 h-4" />
+              <span className="hidden sm:inline">Refresh</span>
             </button>
+            {syncing && (
+              <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                <span className="hidden sm:inline">Syncing</span>
+              </div>
+            )}
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
               <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             </button>
@@ -1111,7 +1125,7 @@ function EmailViewer() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-auto p-3 sm:p-6 bg-white">
+                <div className="flex-1 overflow-auto p-2 sm:p-6 bg-white">
                   {selectedEmail.otp && (
                     <div className="mb-4 sm:mb-8 bg-slate-900 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-center shadow-xl shadow-slate-200 relative overflow-hidden">
                       <div className="relative z-10">
@@ -1127,7 +1141,7 @@ function EmailViewer() {
                       </div>
                     </div>
                   )}
-                  <div className="prose prose-slate max-w-none">
+                  <div className="email-html-wrapper">
                     <div className="gmail-style-content" dangerouslySetInnerHTML={{ __html: selectedEmail.html }} />
                   </div>
                 </div>
@@ -1146,12 +1160,18 @@ function EmailViewer() {
       </main>
 
       <style>{`
-        .gmail-style-content { font-family: 'Inter', sans-serif; line-height: 1.6; color: #334155; font-size: 14px; overflow-x: auto; word-break: break-word; }
-        .gmail-style-content img { max-width: 100%; height: auto; }
+        .email-html-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+        .gmail-style-content { font-family: 'Inter', sans-serif; line-height: 1.6; color: #334155; font-size: 14px; word-break: break-word; }
+        .gmail-style-content img { max-width: 100%; height: auto; display: block; }
         .gmail-style-content a { color: #e11d48; text-decoration: underline; word-break: break-all; }
-        .gmail-style-content table { max-width: 100% !important; width: 100% !important; table-layout: fixed !important; }
+        .gmail-style-content table { border-collapse: collapse; }
         .gmail-style-content td, .gmail-style-content th { word-break: break-word !important; overflow-wrap: break-word !important; }
-        @media (max-width: 480px) { .gmail-style-content { font-size: 12px; } .gmail-style-content table { display: block !important; overflow-x: auto !important; } }
+        @media (max-width: 480px) {
+          .email-html-wrapper { margin: 0 -8px; padding: 0 4px; }
+          .gmail-style-content { font-size: 11px; }
+          .gmail-style-content table { transform: scale(0.85); transform-origin: top left; max-width: 118% !important; }
+          .gmail-style-content td { padding: 2px !important; }
+        }
       `}</style>
     </div>
   );
