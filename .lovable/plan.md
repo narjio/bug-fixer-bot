@@ -1,105 +1,69 @@
 
+Goal
 
-## Problem Summary
+- Inbox ko actually working banana using the uploaded ZIP’s working logic as the base.
+- Behavior same rakhna where possible, but insecure parts fix karna.
+- Password reset emails hidden hi rahenge.
 
-The edge function **is working** -- logs show it connects to IMAP, fetches 30 messages, and processes all 30 successfully. But the function **times out** before sending the response back to the client. Parsing 30 full email sources (with HTML, attachments, etc.) from a 94k+ mailbox takes too long for the edge function's execution limit.
+What I found
 
-Additionally, the user wants:
-1. Remove Firebase completely -- use Lovable Cloud (database) for users, settings, OTPs
-2. Netflix-style profile login (show all user profiles as cards, click profile, enter password)
-3. Emails must actually show up
+- Current viewer UI is not the main problem. `src/App.tsx` already renders any email array it receives.
+- Real mismatch: admin panel saves IMAP / Telegram / reCAPTCHA in `app_settings`, but runtime functions (`fetch-emails`, `send-telegram-otp`, `send-login-notification`) read only backend secrets. So admin panel me credentials save karne se live inbox change hi nahi hota.
+- Edge logs show IMAP connect ho raha hai and emails collect bhi ho rahe hain, so root issue likely wiring / source-of-truth / mailbox logic hai, not basic connection.
+- Current backend has serious vulnerabilities:
+  - `manage-app` has no real auth check for sensitive actions
+  - `app_users` public read exposes sensitive columns
+  - `app_settings` public read can expose secret values
+  - admin protection trusts `localStorage`, and 2FA state is not actually enforced on protected admin actions
 
-## Root Causes
+Plan
 
-1. **Email timeout**: Fetching `source: true` for 30 messages and parsing each with `simpleParser` takes ~40+ seconds. Edge functions have a ~30s timeout. The logs confirm "Processed 30 messages, kept 30" but the response never reaches the client due to timeout.
-2. **Firebase dependency**: All auth, user management, OTP storage, and settings are stored in Firebase Firestore. The app cannot work without Firebase currently.
-3. **Login UX**: Current user login fetches all usernames from Firestore and shows a dropdown after a delay.
+1. Review and transplant the ZIP logic
+- First implementation step will be to extract the uploaded ZIP and compare its `server.ts` and `src/App.tsx` line-by-line with the current app.
+- I’ll copy the reference inbox/request logic as closely as possible instead of continuing partial fixes.
 
-## Plan
+2. Fix the config source-of-truth
+- Remove the broken split where admin panel stores credentials in one place but email functions read another.
+- Use one secure backend source only for IMAP/Telegram runtime config.
+- Admin panel should update the same source the live inbox actually uses.
 
-### Step 1: Fix email fetching (make it actually return data)
-**File**: `supabase/functions/fetch-emails/index.ts`
+3. Replace the email fetch flow with the ZIP behavior
+- Match the ZIP request path, response shape, and inbox loading flow as closely as possible.
+- Keep Gmail-style display.
+- Keep only one email exclusion rule: password reset emails hidden; normal Netflix and OTP mails visible.
 
-- Reduce from 30 to **10 messages** to stay within timeout
-- Use `envelope` + `bodyStructure` fetch instead of `source: true` to get metadata faster
-- Only fetch full `source` for messages that pass initial filtering
-- Add a **connection timeout** of 25 seconds to ensure the function responds before edge timeout
-- Wrap the entire operation in a timeout safety net that returns whatever emails were collected so far
+4. Secure the copied logic before shipping
+- Keep the reference behavior, but not its vulnerabilities.
+- Lock admin-only actions behind real backend validation.
+- Split public profile listing from admin mutations.
+- Stop exposing password hashes, TOTP secrets, IMAP password, Telegram tokens, and secret keys to the client.
 
-### Step 2: Create database tables for users, settings, OTPs
-**Migration**: Create tables in Lovable Cloud
+5. Fix admin auth properly
+- Keep Netflix-style profile selection for users.
+- Make admin panel require actual verified admin state, not just `localStorage`.
+- Ensure second-factor completion is enforced before admin access.
 
-```text
-users table:
-- id (uuid, PK)
-- username (text, unique)
-- password (text, bcrypt hashed)
-- name (text)
-- role (text: 'admin' or 'user')
-- totp_secret (text, nullable)
-- created_at (timestamp)
+6. Tighten the inbox logic
+- Apply the ZIP’s logic, then preserve the good parts of the current mailbox handling:
+  - recent-mail scanning only
+  - no massive full-mailbox scan
+  - optional fallback mailbox handling if Netflix mail is not in INBOX
+- Differentiate “no matching emails” vs “mailbox/config error”.
 
-settings table:
-- key (text, PK)
-- value (jsonb)
+7. Align preview and deployed behavior
+- Make preview and Vercel use the same effective backend flow so live site cannot stay on stale/broken logic.
+- Remove duplicate or conflicting fetch paths.
 
-otps table:
-- user_id (uuid, FK to users)
-- otp (text)
-- created_at (timestamp)
-- expires_at (timestamp)
-```
+Validation
 
-RLS: Public read on users (username, name, role only for profile display). Authenticated write for admin operations. OTPs restricted.
+- Admin-saved mail config immediately affects the real inbox logic.
+- Netflix / normal recent emails show in the inbox.
+- Password reset emails stay hidden.
+- Admin panel remains usable.
+- Sensitive backend data is no longer publicly readable.
 
-### Step 3: Create edge functions for auth operations
-Since auth data moves to Lovable Cloud DB, we need edge functions:
+Technical details
 
-- **`manage-users`**: CRUD operations for users (create, list, delete, update password)
-- **`auth-login`**: Verify username + password, return user data
-- **`manage-settings`**: Get/set settings (IMAP config, Telegram config, ReCAPTCHA)
-- **`manage-otps`**: Create and verify OTPs
-
-### Step 4: Build Netflix-style profile login
-**File**: `src/App.tsx` (UserLoginPage)
-
-- Home screen shows all user profile cards (fetched from `manage-users` edge function)
-- Each card shows user's name with an avatar initial
-- Click a profile card -> password input screen appears
-- Enter password -> login
-- No dropdown delay, no username typing needed
-
-### Step 5: Remove all Firebase code
-**Files to modify**: `src/App.tsx`, remove `src/firebase.ts`
-**Files to remove from imports**: `firebase/firestore`, `firebase/app`, `firebase/auth`
-
-- Replace all `collection()`, `getDocs()`, `getDoc()`, `setDoc()`, `addDoc()`, `deleteDoc()` calls with Supabase edge function calls
-- Replace `db` references with fetch calls to edge functions
-- Remove `firebase`, `firebase-admin` from `package.json`
-- Remove `firebase-applet-config.json`, `firebase-blueprint.json`, `firestore.rules`
-- Keep `server.ts` for Vercel deployment but update it to not use Firebase
-
-### Step 6: Update server.ts for Vercel
-**File**: `server.ts`
-
-- Remove all Firebase imports and initialization
-- For Vercel deployment, `server.ts` API routes should proxy to the Supabase edge functions OR read directly from Lovable Cloud DB
-- Keep the same API routes (`/api/emails`, `/api/auth/notify`, etc.) but make them call edge functions internally
-
-## Technical Details
-
-- **Database**: 3 new tables (users, settings, otps) with RLS policies
-- **Edge functions**: 4 new + 1 updated (fetch-emails fix)
-- **Frontend**: Major refactor of `src/App.tsx` to remove Firebase, add Netflix-style profiles
-- **Packages to remove**: `firebase`, `firebase-admin`, `connect-firestore`
-- **Files to delete**: `src/firebase.ts`, `firebase-applet-config.json`, `firebase-blueprint.json`, `firestore.rules`
-
-## Order of Implementation
-
-1. Fix email edge function (immediate win -- emails will show)
-2. Create database tables
-3. Create auth/settings edge functions
-4. Refactor frontend to use edge functions + Netflix-style login
-5. Remove Firebase files and dependencies
-6. Update server.ts
-
+- Main files likely involved: `src/App.tsx`, `server.ts`, `supabase/functions/fetch-emails/index.ts`, `supabase/functions/manage-app/index.ts`, plus a migration to fix database access.
+- Biggest issue is not mobile UI now; it is broken runtime wiring plus backend security exposure.
+- I can already see the ZIP contains the same key files, so in implementation mode I should transplant from those exact files first, then harden the weak parts.
