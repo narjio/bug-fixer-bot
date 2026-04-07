@@ -872,14 +872,22 @@ function EmailViewer() {
     setLoading(true);
     setError(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25000);
+      console.log("[fetchEmails] Starting fetch...");
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getApiKey()}` },
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+      console.log("[fetchEmails] Response status:", res.status);
       const raw = await res.text();
+      console.log("[fetchEmails] Raw response length:", raw.length, "chars");
       let data: any = null;
       if (raw) {
         try { data = JSON.parse(raw); } catch {
+          console.error("[fetchEmails] JSON parse failed, raw:", raw.substring(0, 200));
           throw new Error(res.status === 400
             ? "Inbox not configured. Ask admin to add IMAP settings."
             : "Email service temporarily unavailable.");
@@ -888,6 +896,7 @@ function EmailViewer() {
       if (!res.ok) throw new Error(data?.error || "Failed to fetch emails.");
 
       const emailList = (Array.isArray(data) ? data : []) as Email[];
+      console.log("[fetchEmails] Parsed", emailList.length, "emails");
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
@@ -897,7 +906,12 @@ function EmailViewer() {
         if (updated) setSelectedEmail(updated);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out (25s). Server may be slow. Try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      }
+      console.error("[fetchEmails] Error:", err);
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
