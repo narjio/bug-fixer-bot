@@ -987,7 +987,7 @@ function EmailViewer() {
       setCountdown(30);
       
       if (selectedEmail) {
-        const updated = data.find((e: Email) => e.id === selectedEmail.id);
+        const updated = emailList.find((e: Email) => e.id === selectedEmail.id);
         if (updated) setSelectedEmail(updated);
       }
     } catch (err) {
