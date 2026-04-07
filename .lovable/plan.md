@@ -1,67 +1,67 @@
 
 
-## Fix Plan: Refresh Button, Email Fetching, and Mobile View
+## Fix Plan: Mobile View, 12hr Time, and Email Sync Issues
 
-### Problems Identified
-
-1. **Refresh button spins non-stop** — The `syncing` state keeps the RefreshCw icon in `animate-spin` and the button disabled. During background IMAP sync (takes 20+ seconds), user cannot manually refresh or even see the button is clickable.
-
-2. **New incoming emails not fetched** — Auto-refresh calls `syncFromImap()` which takes 20+ seconds, often hitting the 22s internal timeout. The edge function gets killed before completing.
-
-3. **Not all last 1 month emails showing** — Only scanning last 200 messages out of 94,459. With that mailbox size, 200 messages might only cover 1-2 days. Need to scan more or use IMAP SEARCH to find Netflix emails specifically.
-
-4. **Email HTML view on mobile is glitchy** — Netflix HTML emails have fixed-width tables that break on small screens.
-
-### What's Actually Working
-- Backend WORKS: 12 Netflix emails are cached in the database right now
-- Cache mode returns instantly (35ms boot + instant DB read)
-- Password reset emails are correctly filtered out
+### Problems from Screenshot
+1. **Email HTML cut off on right** — Netflix email content is clipped, not fitting mobile screen. Current CSS `transform: scale(0.85)` doesn't work properly — leaves dead space and still clips.
+2. **24hr time format** — Shows "23:10:00" instead of "11:10 PM". Two places: inbox list (line 1082) and email detail view (line 1124).
+3. **New incoming emails not fetching** — IMAP sync runs every 10s but takes 25s+ per call, so it's always overlapping/blocked by `isFetchingRef`.
+4. **Not all month's emails showing** — Backend processes newest-first but re-fetches already-cached UIDs too (line 176: `orderedUids = [...uncachedUids, ...alreadyCachedUids]`), wasting time on old emails instead of focusing on new ones only.
 
 ### Plan
 
-**1. Fix refresh button UX**
-- Separate the spinning icon from the manual refresh button
-- Manual refresh = instantly load from cache (no spin needed, it's instant)
-- Show a small "Syncing..." indicator separately, NOT on the refresh button
-- Refresh button should NEVER be disabled — it always loads from cache instantly
+**1. Fix mobile email HTML rendering**
+- Remove `transform: scale(0.85)` — it causes the clipping issue
+- Instead, force all tables to `width: 100% !important; max-width: 100% !important` on mobile
+- Add `table-layout: fixed` and `overflow-wrap: break-word` to prevent overflow
+- Set container width explicitly with proper padding
 
-**2. Fix IMAP scan range for 1 month coverage**
-- Replace the fixed `last 200 messages` scan with IMAP `SEARCH` command: `SEARCH FROM "info@account.netflix.com" SINCE <30 days ago>`
-- This searches the entire mailbox server-side and returns only Netflix message UIDs — much faster than scanning 200 envelopes manually
-- Falls back to last 500 messages if SEARCH isn't supported
+**2. Switch to 12-hour time format**
+- Inbox list time (line 1082): Add `hour12: true` to `toLocaleTimeString`
+- Email detail date (line 1124): Use `toLocaleString` with `hour12: true` and proper India locale format like "07/04/2026, 11:10 PM"
 
-**3. Fix auto-refresh to not block UI**
-- Auto-refresh (every 30s) should ONLY call `loadCachedEmails()` (instant DB read)
-- IMAP sync should happen less frequently (every 2 minutes) and completely in background
-- Manual refresh triggers both: instant cache load + background IMAP sync
+**3. Fix IMAP sync efficiency**
+- In `fetch-emails/index.ts`: Remove re-fetching of already cached UIDs (line 176) — ONLY fetch `uncachedUids`
+- This makes each sync cycle much faster since it only downloads NEW emails
+- With fewer emails to process per cycle, the 25s timeout won't be hit
 
-**4. Improve mobile email view**
-- Force Netflix HTML content into a responsive container with `overflow-x: auto` and `max-width: 100vw`
-- Scale down Netflix HTML tables using CSS `transform: scale()` on very small screens
-- Add proper padding and font sizing for mobile
-- Fix the email detail header (from/date) to wrap properly on small screens
+**4. Adjust sync interval to avoid overlap**
+- Keep 10s cache refresh (instant DB read)
+- Change IMAP sync to 15s interval instead of 10s, giving enough gap for the shorter sync to complete
 
 ### Files to Change
 
-- `src/App.tsx` — EmailViewer component: fix refresh button, auto-refresh logic, mobile email CSS
-- `supabase/functions/fetch-emails/index.ts` — Use IMAP SEARCH for Netflix emails, increase coverage to 1 month
+- `src/App.tsx` — Time format (2 lines), mobile CSS (remove scale, add proper table constraints), sync interval
+- `supabase/functions/fetch-emails/index.ts` — Remove re-fetching cached UIDs (line 176), only process `uncachedUids`
 
 ### Technical Details
 
-Edge function change:
+Time format fix:
 ```
-// Instead of scanning last 200 envelopes:
-const startSeq = Math.max(1, totalMessages - 199);
+// Line 1082 (inbox list)
+{ hour: "2-digit", minute: "2-digit", hour12: true }
 
-// Use IMAP SEARCH (server-side, fast):
-const since = new Date();
-since.setDate(since.getDate() - 30);
-const results = await client.search({ from: "info@account.netflix.com", since });
+// Line 1124 (email detail)  
+new Date(selectedEmail.date).toLocaleString("en-IN", { 
+  day: "2-digit", month: "2-digit", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: true 
+})
 ```
 
-Frontend refresh logic:
-- `fetchEmails()` (manual) → `loadCachedEmails()` instantly, then `syncFromImap()` silently
-- Auto-refresh every 30s → `loadCachedEmails()` ONLY (instant)
-- IMAP sync → triggered on mount, on manual refresh, and every 2 minutes
-- Refresh button NEVER spins or disables — cache reads are instant
+Mobile CSS fix:
+```css
+@media (max-width: 480px) {
+  .gmail-style-content table { 
+    width: 100% !important; 
+    max-width: 100% !important; 
+    table-layout: fixed !important; 
+  }
+  .gmail-style-content td, .gmail-style-content th {
+    max-width: 100vw !important;
+    overflow: hidden !important;
+  }
+}
+```
+
+Backend: Line 176 change from `[...uncachedUids, ...alreadyCachedUids]` to just `uncachedUids`.
 
