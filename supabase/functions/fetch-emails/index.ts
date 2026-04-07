@@ -7,15 +7,9 @@ const corsHeaders = {
 };
 
 const PASSWORD_RESET_KEYWORDS = [
-  "password reset",
-  "reset your password",
-  "forgot password",
-  "change your password",
-  "password change",
-  "reset password",
-  "verify your password",
-  "account recovery",
-  "recover your account",
+  "password reset", "reset your password", "forgot password",
+  "change your password", "password change", "reset password",
+  "verify your password", "account recovery", "recover your account",
 ];
 
 Deno.serve(async (req) => {
@@ -39,84 +33,108 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log("Connecting to IMAP...");
-    const client = new ImapFlow({
-      host: imapHost,
-      port: imapPort,
-      secure: true,
-      auth: { user: imapUser, pass: imapPassword },
-      logger: false,
+    // Wrap entire IMAP operation in a timeout to ensure we respond before edge function limit
+    const emails: any[] = [];
+    let timedOut = false;
+
+    const timeoutPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        timedOut = true;
+        resolve();
+      }, 20000); // 20 second safety net
     });
 
-    await client.connect();
-    console.log("IMAP connected successfully");
-    const lock = await client.getMailboxLock("INBOX");
-    const emails: any[] = [];
+    const fetchPromise = (async () => {
+      const client = new ImapFlow({
+        host: imapHost,
+        port: imapPort,
+        secure: true,
+        auth: { user: imapUser, pass: imapPassword },
+        logger: false,
+      });
 
-    try {
-      // Use mailbox.exists to get total count, then fetch only the latest N
-      const mailbox = client.mailbox;
-      const totalMessages = mailbox?.exists || 0;
-      console.log("Total messages in INBOX:", totalMessages);
+      try {
+        await client.connect();
+        console.log("IMAP connected");
+        const lock = await client.getMailboxLock("INBOX");
 
-      if (totalMessages > 0) {
-        // Fetch last 30 messages by sequence number (no full scan needed)
-        const startSeq = Math.max(1, totalMessages - 29);
-        const range = `${startSeq}:${totalMessages}`;
-        console.log("Fetching range:", range);
+        try {
+          const totalMessages = (client.mailbox as any)?.exists || 0;
+          console.log("Total messages:", totalMessages);
 
-        let msgCount = 0;
-        for await (const message of client.fetch(range, { source: true })) {
-          msgCount++;
-          if (!message.source) continue;
-          const parsed = await simpleParser(message.source);
-          const subject = parsed.subject || "";
-          const bodyText = parsed.text || "";
-          const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
+          if (totalMessages > 0) {
+            // Only fetch last 8 messages to stay within timeout
+            const startSeq = Math.max(1, totalMessages - 7);
+            const range = `${startSeq}:${totalMessages}`;
+            console.log("Fetching range:", range);
 
-          // Skip password reset emails only
-          const isPasswordReset = PASSWORD_RESET_KEYWORDS.some(keyword =>
-            normalizedContent.includes(keyword)
-          );
+            for await (const message of client.fetch(range, { source: true })) {
+              if (timedOut) {
+                console.log("Timeout reached, returning collected emails");
+                break;
+              }
+              if (!message.source) continue;
 
-          if (isPasswordReset) {
-            console.log("Skipping password reset email:", subject);
-            continue;
+              try {
+                const parsed = await simpleParser(message.source);
+                const subject = parsed.subject || "";
+                const bodyText = parsed.text || "";
+                const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
+
+                // Skip password reset emails only
+                const isPasswordReset = PASSWORD_RESET_KEYWORDS.some(kw =>
+                  normalizedContent.includes(kw)
+                );
+                if (isPasswordReset) {
+                  console.log("Skipping password reset:", subject);
+                  continue;
+                }
+
+                const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
+                const otp = otpMatch ? otpMatch[0] : null;
+
+                emails.push({
+                  id: message.uid,
+                  subject: parsed.subject,
+                  from: parsed.from?.text,
+                  to: parsed.to
+                    ? Array.isArray(parsed.to)
+                      ? parsed.to[0]?.text
+                      : parsed.to.text
+                    : undefined,
+                  date: parsed.date,
+                  otp,
+                  preview: bodyText.length > 100
+                    ? `${bodyText.substring(0, 100)}...`
+                    : bodyText,
+                  html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
+                });
+              } catch (parseErr) {
+                console.error("Failed to parse message:", parseErr);
+              }
+            }
+            console.log("Collected", emails.length, "emails");
           }
-
-          // Try to detect OTP (for badge display only, not filtering)
-          const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
-          const otp = otpMatch ? otpMatch[0] : null;
-
-          emails.push({
-            id: message.uid,
-            subject: parsed.subject,
-            from: parsed.from?.text,
-            to: parsed.to
-              ? Array.isArray(parsed.to)
-                ? parsed.to[0]?.text
-                : parsed.to.text
-              : undefined,
-            date: parsed.date,
-            otp,
-            preview:
-              bodyText.length > 100
-                ? `${bodyText.substring(0, 100)}...`
-                : bodyText,
-            html:
-              parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
-          });
+        } finally {
+          lock.release();
         }
-        console.log("Processed", msgCount, "messages, kept", emails.length);
-      }
-    } finally {
-      lock.release();
-    }
 
-    await client.logout();
-    emails.sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
+        try {
+          await client.logout();
+        } catch {
+          // ignore logout errors
+        }
+      } catch (connErr) {
+        // If we already have some emails, return them despite connection error
+        if (emails.length === 0) throw connErr;
+        console.error("IMAP error (returning partial):", connErr);
+      }
+    })();
+
+    // Race between fetch and timeout
+    await Promise.race([fetchPromise, timeoutPromise]);
+
+    emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return new Response(JSON.stringify(emails), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -124,8 +142,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error("Email fetch error:", err);
     const errorMessage = err instanceof Error ? err.message : String(err);
-    const isImapAuthError =
-      /auth|login|invalid credentials|authenticationfailed/i.test(errorMessage);
+    const isImapAuthError = /auth|login|invalid credentials|authenticationfailed/i.test(errorMessage);
 
     return new Response(
       JSON.stringify({
