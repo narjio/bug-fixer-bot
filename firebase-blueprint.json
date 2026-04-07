@@ -20,12 +20,11 @@
       "properties": {
         "userId": { "type": "string", "description": "ID of the user who logged in." },
         "username": { "type": "string", "description": "Username used for login." },
-        "ip": { "type": "string", "description": "IP address of the user." },
         "location": { "type": "object", "description": "Geographic location details." },
         "timestamp": { "type": "string", "format": "date-time", "description": "Time of login." },
         "status": { "type": "string", "enum": ["success", "failed"], "description": "Login status." }
       },
-      "required": ["username", "ip", "timestamp", "status"]
+      "required": ["username", "timestamp", "status"]
     },
     "settings": {
       "title": "Settings",

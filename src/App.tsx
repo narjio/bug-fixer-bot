@@ -29,30 +29,52 @@ interface UserData {
 }
 
 // --- Helpers ---
-const getPreciseLocation = (): Promise<{lat: number, lon: number}> => {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("Geolocation is not supported by your browser."));
-      return;
+const getPreciseLocation = async (retries = 1): Promise<{lat: number, lon: number, city: string, state: string}> => {
+  const fetchLocation = (): Promise<{lat: number, lon: number}> => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation is not supported by your browser."));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude
+          });
+        },
+        (error) => {
+          reject(error);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    });
+  };
+
+  try {
+    const coords = await fetchLocation();
+    
+    // Reverse Geocoding
+    let city = "Unknown City";
+    let state = "Unknown State";
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`);
+      const data = await res.json();
+      if (data.address) {
+        city = data.address.city || data.address.town || data.address.village || data.address.county || "Unknown City";
+        state = data.address.state || data.address.region || "Unknown State";
+      }
+    } catch (e) {
+      console.error("Geocoding failed", e);
     }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          lat: position.coords.latitude,
-          lon: position.coords.longitude
-        });
-      },
-      (error) => {
-        console.warn("Geolocation error:", error);
-        if (error.code === error.PERMISSION_DENIED) {
-          reject(new Error("Location permission is required to log in. Please enable it in your browser settings and try again."));
-        } else {
-          reject(new Error("Failed to get location. Please ensure your GPS is enabled."));
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  });
+
+    return { ...coords, city, state };
+  } catch (error) {
+    if (retries > 0) {
+      return getPreciseLocation(retries - 1);
+    }
+    throw new Error("Location access is required to use this system. Please enable it.");
+  }
 };
 
 // --- Components ---
@@ -106,7 +128,9 @@ function UserLoginPage() {
           name: userData.name, 
           status: "success",
           lat: loc.lat,
-          lon: loc.lon
+          lon: loc.lon,
+          city: loc.city,
+          state: loc.state
         }),
       });
 

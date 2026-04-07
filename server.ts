@@ -163,47 +163,28 @@ async function startServer() {
     }
   });
 
-  // API Route for Login Notification & IP Capture
+  // API Route for Login Notification & Location Capture
   app.post("/api/auth/notify", async (req, res) => {
-    const { username, status, name, lat, lon } = req.body;
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+    const { username, status, name, lat, lon, city, state } = req.body;
     
-    let locationData = "Unknown";
+    let locationData = "Unknown Location";
     let mapsLink = "";
 
     if (lat && lon) {
-      try {
-        const locRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
-          headers: { "User-Agent": "NetflixMonitor/1.0" }
-        });
-        const loc = await locRes.json() as any;
-        locationData = loc.display_name || `${lat}, ${lon}`;
-        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
-      } catch (err) {
-        locationData = `Lat: ${lat}, Lon: ${lon}`;
-        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
-      }
-    } else {
-      try {
-        const locRes = await fetch(`http://ip-api.com/json/${ip}`);
-        const loc = await locRes.json() as any;
-        if (loc.status === "success") {
-          locationData = `${loc.city}, ${loc.regionName}, ${loc.country}`;
-        }
-      } catch (err) {}
+      locationData = `${city || "Unknown City"}, ${state || "Unknown State"}`;
+      mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
     }
 
     const message = `
 <b>🔐 Login Attempt</b>
 <b>User:</b> ${name || username}
 <b>Status:</b> ${status === "success" ? "✅ Success" : "❌ Failed"}
-<b>IP:</b> ${ip}
 <b>Location:</b> ${locationData}${mapsLink}
 <b>Time:</b> ${new Date().toLocaleString()}
     `;
 
     await sendTelegramNotification(message);
-    res.json({ success: true, ip, location: locationData });
+    res.json({ success: true, location: locationData });
   });
 
   // Admin 3FA: Generate Telegram OTP
