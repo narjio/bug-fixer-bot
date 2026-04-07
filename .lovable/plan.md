@@ -1,37 +1,37 @@
 
 
-## Fix: Netflix Emails Not Showing (Backend Works, Frontend Broken)
+## Fix: Emails Not Displaying on Frontend
 
-### What I Confirmed
-- Edge function `fetch-emails` **works** — just tested it, returns 5 Netflix emails from `info@account.netflix.com`
-- Password reset emails are correctly skipped (2 skipped in latest run)
-- Emails returned: "Netflix: your sign-in code" (x2), "Confirmation: Your Netflix household has been confirmed", "A new device is using your account", "Important: How to update your Netflix household"
-- Frontend code at `src/App.tsx` line 890 correctly parses the array
+### What's Confirmed Working
+- Backend edge function returns **5 Netflix emails** successfully (just tested — 200 OK)
+- Password reset emails ("Complete your password reset request") are correctly hidden
+- Netflix OTP emails ("Netflix: your sign-in code", "temporary access code") ARE included
+- Filter is correct: only `info@account.netflix.com` emails, password resets excluded
 
 ### Root Cause
-The edge function takes **8-10 seconds** to respond. The frontend has no issue parsing the response, BUT:
-1. The function may be hitting the **edge function execution time limit** on some calls — it was timing out at 26s in earlier versions
-2. The user is testing on **Vercel** (`bug-fixer-bot.vercel.app`) which may have **stale frontend code** from before all the fixes
-3. There's a possibility the `res.text()` call at line 879 returns empty on timeout, causing `data` to be null → `Array.isArray(null)` = false → empty array
+The frontend `fetchEmails()` function calls the edge function correctly, but:
+1. The edge function takes **8-12 seconds** to respond (IMAP connection + parsing)
+2. The response may be getting silently dropped or the function may hit the edge runtime's **30s wall clock limit** on slower calls
+3. The `signal: controller.signal` passes `AbortController` but the `body` is missing — the edge function expects a POST but receives no body, which could cause issues on some runtimes
 
 ### Plan
 
-1. **Add robust error handling and timeout protection in frontend**
-   - Add a 25-second fetch timeout using `AbortController` so the user sees a clear timeout message instead of silent failure
-   - Log the raw response to console for debugging
-   - Show the actual error message when fetch fails
+1. **Fix the fetch call** — Add `body: JSON.stringify({})` to the POST request so it's a valid POST with content. Some edge runtimes reject bodyless POSTs or behave unexpectedly.
 
-2. **Increase edge function scan range**
-   - Currently scanning last 50 messages — if Netflix emails are older, increase to last 100 to catch more
+2. **Add the apikey header** — Current code only sends `Authorization: Bearer <key>` but the edge function also needs `apikey` header for Supabase gateway routing. Without it, the request may be rejected silently by the Supabase gateway before reaching the function.
 
-3. **Add console logging in frontend for debugging**
-   - Log response status, response length, and parsed email count so we can see what's happening on the user's end
+3. **Add visible debug state** — Show the actual response status and any error message directly in the UI (temporarily) so we can see what's happening on the user's device instead of guessing.
+
+4. **Increase timeout to 30s** — Current 25s timeout is too close to the edge function's own processing time. Increase to 30s.
+
+5. **Password reset filter stays exactly as-is** — Only emails with subjects containing "reset your password", "forgot password", "password reset", "change your password", or "password change" are hidden. Everything else from Netflix shows.
 
 ### Files to Change
-- `src/App.tsx` — fetchEmails function (lines 869-904): add AbortController timeout, better error logging
-- `supabase/functions/fetch-emails/index.ts` — no changes needed, already working correctly
+- `src/App.tsx` — Fix `fetchEmails()` function (lines 875-882): add body, apikey header, increase timeout, add debug output
 
-### After Implementation
-- Redeploy edge function (already working)
-- User needs to redeploy to Vercel for frontend changes to take effect on their live site
+### Technical Details
+- The `apikey` header is required by Supabase Edge Function gateway alongside the `Authorization` header
+- Current code at line 880: `headers: { "Content-Type": "application/json", "Authorization": \`Bearer ${getApiKey()}\` }`
+- Needs to become: `headers: { "Content-Type": "application/json", "Authorization": \`Bearer ${getApiKey()}\`, "apikey": getApiKey() }`
+- Add `body: JSON.stringify({})` to the fetch options
 
