@@ -1,9 +1,6 @@
 import { ImapFlow } from "npm:imapflow@1.2.18";
 import { simpleParser } from "npm:mailparser@3.9.6";
 
-import { ImapFlow } from "npm:imapflow@1.2.18";
-import { simpleParser } from "npm:mailparser@3.9.6";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -32,6 +29,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log("Connecting to IMAP...");
     const client = new ImapFlow({
       host: imapHost,
       port: imapPort,
@@ -41,6 +39,7 @@ Deno.serve(async (req) => {
     });
 
     await client.connect();
+    console.log("IMAP connected successfully");
     const lock = await client.getMailboxLock("INBOX");
     const emails: any[] = [];
 
