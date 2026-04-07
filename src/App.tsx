@@ -66,6 +66,37 @@ async function sendTelegramOtp(otp: string, userId: string) {
   }
 }
 
+async function sendLoginNotification(data: {
+  username: string;
+  name: string;
+  status: "success" | "failed";
+  lat?: number;
+  lon?: number;
+  city?: string;
+  state?: string;
+}) {
+  const serviceUrl = getRuntimeValue(import.meta.env.VITE_SUPABASE_URL, OTP_SERVICE_FALLBACK.url);
+  const serviceKey = getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key);
+
+  try {
+    const response = await fetch(`${serviceUrl}/functions/v1/send-login-notification`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errData = await response.text();
+      console.error("Login notification failed:", errData);
+    }
+  } catch (err) {
+    console.error("Failed to send login notification:", err);
+  }
+}
+
 // Auth Context
 const AuthContext = createContext<{ user: any, loading: boolean, checkAuth: () => Promise<void> } | null>(null);
 
@@ -225,19 +256,12 @@ function UserLoginPage() {
 
       // Send login notification with location to Telegram
       try {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            username: userData.username,
-            name: userData.name,
-            status: "success",
-            lat: loc.lat,
-            lon: loc.lon,
-            city: loc.city,
-            state: loc.state,
-          }),
+        await sendLoginNotification({
+          username: userData.username,
+          name: userData.name,
+          status: "success",
+          lat: loc.lat,
+          lon: loc.lon,
         });
       } catch (notifyErr) {
         console.error("Failed to send login notification:", notifyErr);
@@ -418,19 +442,12 @@ function AdminLoginPage() {
 
       // Send login notification with location to Telegram
       try {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            username: userData.username,
-            name: userData.name,
-            status: "success",
-            lat: loc.lat,
-            lon: loc.lon,
-            city: loc.city,
-            state: loc.state,
-          }),
+        await sendLoginNotification({
+          username: userData.username,
+          name: userData.name,
+          status: "success",
+          lat: loc.lat,
+          lon: loc.lon,
         });
       } catch (notifyErr) {
         console.error("Failed to send login notification:", notifyErr);
