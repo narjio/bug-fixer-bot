@@ -166,19 +166,6 @@ function UserLoginPage() {
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
 
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
-          name: userData.name, 
-          status: "success",
-          lat: loc.lat,
-          lon: loc.lon,
-          city: loc.city,
-          state: loc.state
-        }),
-      });
 
       localStorage.setItem("user", JSON.stringify(userData));
       navigate("/viewer");
