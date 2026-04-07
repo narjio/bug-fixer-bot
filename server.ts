@@ -8,7 +8,10 @@ import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, collection, query, where, addDoc, getDocs } from "firebase/firestore";
-import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+import { readFileSync } from 'fs';
+import path from 'path';
+
+const firebaseConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
 import admin from "firebase-admin";
 import session from "express-session";
 import cookieParser from "cookie-parser";
