@@ -123,6 +123,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "change_password") {
+      const { id, current_password, new_password } = params;
+      if (!id || !new_password) throw new Error("ID and new password required");
+
+      const { data: user, error: fetchErr } = await supabase
+        .from("app_users")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (fetchErr || !user) throw new Error("User not found");
+
+      // If current_password provided, verify it
+      if (current_password) {
+        const match = await verifyPassword(current_password, user.password);
+        if (!match) throw new Error("Current password is incorrect");
+      }
+
+      const hashed = await hashPassword(new_password);
+      const { error } = await supabase.from("app_users").update({ password: hashed }).eq("id", id);
+      if (error) throw error;
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "update_totp") {
       const { id, totp_secret } = params;
       const { error } = await supabase.from("app_users").update({ totp_secret }).eq("id", id);
