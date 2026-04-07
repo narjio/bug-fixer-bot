@@ -169,6 +169,7 @@ function UserLoginPage() {
 
 
       localStorage.setItem("user", JSON.stringify(userData));
+      await checkAuth();
       navigate("/viewer");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
