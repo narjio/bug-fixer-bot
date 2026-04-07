@@ -274,6 +274,7 @@ function AdminLoginPage() {
   const [siteKey, setSiteKey] = useState<string | null>(null);
   const [showCaptchaModal, setShowCaptchaModal] = useState(false);
   const navigate = useNavigate();
+  const { checkAuth } = useAuth();
 
   useEffect(() => {
     const fetchSettings = async () => {
