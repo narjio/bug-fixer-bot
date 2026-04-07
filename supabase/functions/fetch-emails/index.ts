@@ -71,10 +71,6 @@ Deno.serve(async (req) => {
     });
 
     const emails: any[] = [];
-    let timedOut = false;
-
-    // 25 second safety timeout
-    const timeout = setTimeout(() => { timedOut = true; }, 25000);
 
     try {
       await client.connect();
@@ -86,55 +82,56 @@ Deno.serve(async (req) => {
         console.log("Total messages:", totalMessages);
 
         if (totalMessages > 0) {
-          // Fetch last 15 messages - small enough to parse in time
-          const startSeq = Math.max(1, totalMessages - 14);
+          // Fetch last 8 messages only - keeps it fast
+          const startSeq = Math.max(1, totalMessages - 7);
           const range = `${startSeq}:${totalMessages}`;
           console.log("Fetching range:", range);
 
-          for await (const message of client.fetch(range, { source: true })) {
-            if (timedOut) {
-              console.log("Timeout reached, returning what we have");
-              break;
-            }
-            if (!message.source) continue;
+          // Step 1: Fetch envelope data only (very fast, no body download)
+          const envelopes: any[] = [];
+          for await (const message of client.fetch(range, { envelope: true, uid: true })) {
+            envelopes.push(message);
+          }
+          console.log("Got", envelopes.length, "envelopes");
 
+          // Step 2: Filter out password reset emails by subject
+          const validMessages = envelopes.filter(msg => {
+            const subject = (msg.envelope?.subject || "").toLowerCase();
+            return !PASSWORD_RESET_KEYWORDS.some(kw => subject.includes(kw));
+          });
+          console.log("After filter:", validMessages.length, "messages");
+
+          // Step 3: Fetch full source only for filtered messages (max 8)
+          for (const msg of validMessages.slice(0, 8)) {
             try {
-              const parsed = await simpleParser(message.source, {
+              // Fetch source for this specific UID
+              const fullMsg = await client.fetchOne(msg.uid, { source: true }, { uid: true });
+              if (!fullMsg?.source) continue;
+
+              const parsed = await simpleParser(fullMsg.source, {
                 skipImageLinks: true,
                 skipTextLinks: true,
               });
 
-              const subject = (parsed.subject || "").trim();
               const bodyText = (parsed.text || "").trim();
-              const fromText = parsed.from?.text || "";
-              const normalizedContent = `${subject}\n${fromText}\n${bodyText}`.toLowerCase();
-
-              const isPasswordReset = PASSWORD_RESET_KEYWORDS.some((kw) =>
-                normalizedContent.includes(kw)
-              );
-              if (isPasswordReset) {
-                console.log("Skipping password reset:", subject);
-                continue;
-              }
-
-              const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
+              const otpMatch = bodyText.match(/\b\d{4,8}\b/);
               const otp = otpMatch ? otpMatch[0] : null;
 
               emails.push({
-                id: message.uid,
-                subject: parsed.subject,
-                from: parsed.from?.text,
+                id: msg.uid,
+                subject: parsed.subject || msg.envelope?.subject,
+                from: parsed.from?.text || msg.envelope?.from?.[0]?.address,
                 to: parsed.to
                   ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
-                  : undefined,
-                date: parsed.date,
+                  : msg.envelope?.to?.[0]?.address,
+                date: parsed.date || msg.envelope?.date,
                 otp,
                 preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
                 html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
               });
-              console.log("Added email:", subject);
+              console.log("Added email:", parsed.subject || msg.envelope?.subject);
             } catch (parseErr) {
-              console.error("Parse error:", parseErr);
+              console.error("Parse error for UID", msg.uid, ":", parseErr);
             }
           }
         }
@@ -148,8 +145,6 @@ Deno.serve(async (req) => {
     } catch (connErr) {
       if (emails.length === 0) throw connErr;
       console.error("IMAP error (returning partial):", connErr);
-    } finally {
-      clearTimeout(timeout);
     }
 
     emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
