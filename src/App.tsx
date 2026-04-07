@@ -999,10 +999,11 @@ function EmailViewer() {
               <span className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase leading-tight">Refresh</span>
               <span className="text-xs sm:text-sm font-mono font-bold text-red-600">{countdown}s</span>
             </div>
-            <button onClick={() => fetchEmails()} disabled={loading}
+            <button onClick={() => fetchEmails()} disabled={loading || syncing}
               className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all disabled:opacity-50 active:scale-95">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Refresh</span>
+              <RefreshCw className={`w-4 h-4 ${(loading || syncing) ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">{syncing ? "Syncing..." : "Refresh"}</span>
+            </button>
             </button>
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
               <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
