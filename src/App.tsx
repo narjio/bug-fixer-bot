@@ -32,6 +32,40 @@ async function safeJson(res: Response): Promise<any> {
   }
 }
 
+const OTP_SERVICE_FALLBACK = {
+  url: "https://osxinhctzabxeycyeflg.supabase.co",
+  key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ",
+};
+
+function getRuntimeValue(value: string | undefined, fallback: string) {
+  if (!value || value === "undefined" || value === "null") {
+    return fallback;
+  }
+
+  return value;
+}
+
+async function sendTelegramOtp(otp: string, userId: string) {
+  const otpServiceUrl = getRuntimeValue(import.meta.env.VITE_SUPABASE_URL, OTP_SERVICE_FALLBACK.url);
+  const otpServiceKey = getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key);
+
+  const response = await fetch(`${otpServiceUrl}/functions/v1/send-telegram-otp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${otpServiceKey}`,
+    },
+    body: JSON.stringify({ otp, userId }),
+  });
+
+  const data = await safeJson(response).catch(() => ({ success: false }));
+
+  if (!response.ok || !data?.success) {
+    console.error("Telegram OTP failed:", data);
+    throw new Error("OTP delivery failed");
+  }
+}
+
 // Auth Context
 const AuthContext = createContext<{ user: any, loading: boolean, checkAuth: () => Promise<void> } | null>(null);
 
@@ -530,29 +564,16 @@ function AdminAuthPage() {
           const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
           await setDoc(doc(db, "otps", user.id), { otp: otpCode, createdAt: serverTimestamp() });
 
-          // Send OTP via secure edge function (bot token never exposed to frontend)
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-          const telegramRes = await fetch(`${supabaseUrl}/functions/v1/send-telegram-otp`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${supabaseKey}`
-            },
-            body: JSON.stringify({ otp: otpCode, userId: user.id })
-          });
-
-          if (!telegramRes.ok) {
-            const errData = await telegramRes.json().catch(() => ({}));
-            console.error("Telegram OTP failed:", errData);
-            toast.error("OTP generated but Telegram delivery failed.");
-          } else {
-            toast.success("Secure OTP sent to your Telegram.");
-          }
+          await sendTelegramOtp(otpCode, user.id);
+          toast.success("Secure OTP sent to your Telegram.");
           setLoading(false);
         } catch (err) {
           setLoading(false);
-          const errorMsg = err instanceof Error ? err.message : "Failed to generate OTP";
+          const errorMsg = err instanceof Error && err.message === "OTP delivery failed"
+            ? "OTP generated but Telegram delivery failed."
+            : err instanceof Error
+              ? err.message
+              : "Failed to generate OTP";
           setError(errorMsg);
           toast.error(errorMsg);
           otpRequested.current = false;
