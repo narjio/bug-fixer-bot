@@ -104,7 +104,7 @@ const getPreciseLocation = async (retries = 1): Promise<{lat: number, lon: numbe
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`, {
         headers: { "User-Agent": "AdminPanel/1.0" }
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       console.log("Geocoding response:", data);
       if (data.address) {
         city = data.address.city || data.address.town || data.address.village || data.address.county || "Unknown City";
