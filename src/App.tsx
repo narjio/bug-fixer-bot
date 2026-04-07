@@ -912,7 +912,7 @@ function EmailViewer() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out (25s). Server may be slow. Try again.");
+        setError("Request timed out (30s). Server may be slow. Try again.");
       } else {
         setError(err instanceof Error ? err.message : "Unknown error");
       }
