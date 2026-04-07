@@ -522,13 +522,12 @@ function AdminAuthPage() {
   const verifyTelegramOtp = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otp }),
-      });
-      const data = await safeJson(res);
-      if (!res.ok) throw new Error(data.error || "Invalid OTP");
+      const otpDoc = await getDoc(doc(db, "otps", user.id));
+      if (!otpDoc.exists() || otpDoc.data().otp !== otp) {
+        throw new Error("Invalid OTP");
+      }
+      // Delete used OTP
+      await deleteDoc(doc(db, "otps", user.id));
       setStep(2);
       setError("");
     } catch (err) {
