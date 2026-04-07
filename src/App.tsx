@@ -867,11 +867,11 @@ function EmailViewer() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const [syncing, setSyncing] = useState(false);
+  const syncIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load cached emails from DB (instant)
   const loadCachedEmails = async () => {
     try {
-      console.log("[loadCached] Loading from cache...");
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -885,7 +885,6 @@ function EmailViewer() {
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
       const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[loadCached] Got", emailList.length, "cached emails");
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
@@ -896,15 +895,14 @@ function EmailViewer() {
     }
   };
 
-  // Sync from IMAP server (background, updates cache)
+  // Sync from IMAP server (background, silent)
   const syncFromImap = async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setSyncing(true);
     try {
-      console.log("[syncIMAP] Starting IMAP sync...");
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      const timeout = setTimeout(() => controller.abort(), 50000);
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -921,17 +919,14 @@ function EmailViewer() {
       if (raw) { try { data = JSON.parse(raw); } catch {} }
       if (!res.ok) {
         const errMsg = data?.error || "Failed to sync emails.";
-        console.error("[syncIMAP] Error:", errMsg);
         setError(errMsg);
         return;
       }
-      const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[syncIMAP] Synced", emailList.length, "emails from IMAP");
-      // Reload from cache to get all emails (including previously cached ones)
+      // After IMAP sync, reload from cache to get full list
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        console.error("[syncIMAP] Timeout - will retry on next refresh");
+        console.log("[syncIMAP] Timeout - will retry next cycle");
       } else {
         console.error("[syncIMAP] Error:", err);
       }
@@ -943,35 +938,48 @@ function EmailViewer() {
 
   // Manual refresh: instant cache load + background IMAP sync
   const fetchEmails = async () => {
-    setLoading(true);
     setError(null);
-    try {
-      await loadCachedEmails();
-      // Trigger IMAP sync in background
-      syncFromImap();
-    } finally {
-      setLoading(false);
-      setCountdown(refreshIntervalSeconds);
-    }
+    await loadCachedEmails();
+    setCountdown(refreshIntervalSeconds);
+    // Trigger IMAP sync silently in background
+    syncFromImap();
   };
 
   useEffect(() => {
     // On mount: load cache instantly, then sync from IMAP
     setLoading(true);
-    loadCachedEmails().then((count) => {
+    loadCachedEmails().then(() => {
       setLoading(false);
-      // Always sync on first load
       syncFromImap();
     });
-    const interval = setInterval(() => {
+
+    // Auto-refresh from cache every 30s (instant)
+    const cacheInterval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) { syncFromImap().then(() => loadCachedEmails()); return refreshIntervalSeconds; }
+        if (prev <= 1) {
+          loadCachedEmails();
+          return refreshIntervalSeconds;
+        }
         return prev - 1;
       });
     }, 1000);
-    const handleVisibility = () => { if (document.visibilityState === "visible") { loadCachedEmails(); syncFromImap(); } };
+
+    // IMAP sync every 2 minutes (background)
+    syncIntervalRef.current = setInterval(() => {
+      syncFromImap();
+    }, 120000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadCachedEmails();
+      }
+    };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
+    return () => {
+      clearInterval(cacheInterval);
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   const copyOtp = (otp: string) => {
