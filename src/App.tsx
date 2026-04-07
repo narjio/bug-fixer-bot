@@ -965,14 +965,14 @@ function EmailViewer() {
   };
 
   useEffect(() => {
-    // On mount: load cache instantly, then sync from IMAP
+    // On mount: load cache instantly, then do ONE IMAP sync
     setLoading(true);
     loadCachedEmails().then(() => {
       setLoading(false);
-      syncFromImap();
+      syncFromImap(); // One-time sync on mount
     });
 
-    // Auto-refresh from cache every 30s (instant)
+    // Auto-refresh from cache every 10s via Cloudflare Worker (free, instant)
     const cacheInterval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
@@ -983,10 +983,8 @@ function EmailViewer() {
       });
     }, 1000);
 
-    // IMAP sync every 10 seconds (background)
-    syncIntervalRef.current = setInterval(() => {
-      syncFromImap();
-    }, 10000);
+    // NO more IMAP sync interval — Cloudflare Worker handles Supabase DB refresh
+    // IMAP sync only happens on manual refresh button click
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -996,7 +994,6 @@ function EmailViewer() {
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       clearInterval(cacheInterval);
-      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
