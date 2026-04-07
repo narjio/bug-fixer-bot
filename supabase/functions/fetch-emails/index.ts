@@ -9,7 +9,8 @@ const corsHeaders = {
 
 const PASSWORD_RESET_SUBJECTS = [
   "reset your password", "forgot password", "password reset",
-  "change your password", "password change",
+  "change your password", "password change", "password recovery",
+  "account recovery", "reset password",
 ];
 
 Deno.serve(async (req) => {
@@ -23,14 +24,12 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Parse request body
     let body: any = {};
     try { body = await req.json(); } catch {}
-    const mode = body.mode || "sync"; // "cache" = instant from DB, "sync" = fetch from IMAP + update cache
+    const mode = body.mode || "sync";
 
     // MODE: CACHE — return cached emails instantly from database
     if (mode === "cache") {
-      console.log("Cache mode: returning cached emails from DB");
       const { data: cached, error: cacheErr } = await supabase
         .from("cached_emails")
         .select("*")
@@ -43,7 +42,6 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Transform to expected format
       const emails = (cached || []).map((e: any) => ({
         id: e.id,
         subject: e.subject,
@@ -55,13 +53,12 @@ Deno.serve(async (req) => {
         html: e.html,
       }));
 
-      console.log("Returning", emails.length, "cached emails");
       return new Response(JSON.stringify(emails), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // MODE: SYNC — fetch from IMAP, save to cache, return results
+    // MODE: SYNC — fetch from IMAP using SEARCH, save to cache
     console.log("Sync mode: fetching from IMAP server");
 
     let imapHost = "";
@@ -112,7 +109,7 @@ Deno.serve(async (req) => {
 
     const emails: any[] = [];
     let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; }, 22000);
+    const timeout = setTimeout(() => { timedOut = true; }, 25000);
 
     try {
       await client.connect();
@@ -120,72 +117,91 @@ Deno.serve(async (req) => {
       const lock = await client.getMailboxLock("INBOX");
 
       try {
-        const totalMessages = (client.mailbox as any)?.exists || 0;
-        console.log("Total messages:", totalMessages);
-
-        if (totalMessages > 0) {
-          // Scan last 200 messages for 1 month of Netflix emails
-          const startSeq = Math.max(1, totalMessages - 199);
-          const range = `${startSeq}:${totalMessages}`;
-          console.log("Scanning range:", range);
-
-          // Step 1: Get envelopes to find Netflix emails
-          const netflixMessages: { seq: number; uid: number; subject: string }[] = [];
-          for await (const message of client.fetch(range, { envelope: true, uid: true })) {
-            if (timedOut) break;
-            const fromAddr = message.envelope?.from?.[0]?.address?.toLowerCase() || "";
-            if (fromAddr === "info@account.netflix.com") {
-              const subject = message.envelope?.subject || "";
-              const subjectLower = subject.toLowerCase();
-              const isPasswordReset = PASSWORD_RESET_SUBJECTS.some(kw => subjectLower.includes(kw));
-              if (isPasswordReset) {
-                console.log("Skipping password reset:", subject);
-                continue;
-              }
-              netflixMessages.push({ seq: message.seq, uid: message.uid, subject });
-            }
+        // Use IMAP SEARCH to find Netflix emails from last 30 days (server-side, fast)
+        const since = new Date();
+        since.setDate(since.getDate() - 30);
+        
+        let netflixUids: number[] = [];
+        try {
+          console.log("Using IMAP SEARCH for Netflix emails since", since.toISOString().split("T")[0]);
+          const searchResults = await client.search({
+            from: "info@account.netflix.com",
+            since: since,
+          }, { uid: true });
+          
+          if (searchResults && searchResults.length > 0) {
+            netflixUids = searchResults as number[];
+            console.log("IMAP SEARCH found", netflixUids.length, "Netflix messages");
           }
-          console.log("Found", netflixMessages.length, "Netflix emails (after filter)");
+        } catch (searchErr) {
+          console.log("IMAP SEARCH failed, falling back to envelope scan:", searchErr);
+        }
 
-          // Step 2: Fetch full source for Netflix emails
-          for (const msg of netflixMessages) {
-            if (timedOut) {
-              console.log("Timeout reached, returning what we have");
-              break;
+        // Fallback: if SEARCH didn't work, scan last 500 envelopes
+        if (netflixUids.length === 0) {
+          const totalMessages = (client.mailbox as any)?.exists || 0;
+          console.log("Fallback: scanning last 500 of", totalMessages, "messages");
+          
+          if (totalMessages > 0) {
+            const startSeq = Math.max(1, totalMessages - 499);
+            const range = `${startSeq}:${totalMessages}`;
+            
+            for await (const message of client.fetch(range, { envelope: true, uid: true })) {
+              if (timedOut) break;
+              const fromAddr = message.envelope?.from?.[0]?.address?.toLowerCase() || "";
+              if (fromAddr === "info@account.netflix.com") {
+                netflixUids.push(message.uid);
+              }
             }
-            try {
-              const fullMsg = await client.fetchOne(msg.uid, { source: true }, { uid: true });
-              if (!fullMsg?.source) continue;
-
-              const parsed = await simpleParser(fullMsg.source, {
-                skipImageLinks: true,
-                skipTextLinks: true,
-              });
-
-              const bodyText = (parsed.text || "").trim();
-              const otpMatch = bodyText.match(/\b\d{4,8}\b/);
-              const otp = otpMatch ? otpMatch[0] : null;
-
-              emails.push({
-                id: String(msg.uid),
-                subject: parsed.subject || msg.subject,
-                from: parsed.from?.text || "Netflix <info@account.netflix.com>",
-                to: parsed.to
-                  ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
-                  : undefined,
-                date: parsed.date,
-                otp,
-                preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
-                html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
-              });
-              console.log("Added:", msg.subject);
-            } catch (parseErr) {
-              console.error("Parse error:", parseErr);
-            }
+            console.log("Envelope scan found", netflixUids.length, "Netflix messages");
           }
         }
 
-        console.log("Collected", emails.length, "Netflix emails");
+        // Fetch full content for each Netflix email
+        for (const uid of netflixUids) {
+          if (timedOut) {
+            console.log("Timeout reached, returning what we have");
+            break;
+          }
+          try {
+            const fullMsg = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
+            if (!fullMsg?.source) continue;
+
+            // Check subject for password reset BEFORE parsing (faster)
+            const envSubject = (fullMsg.envelope?.subject || "").toLowerCase();
+            const isPasswordReset = PASSWORD_RESET_SUBJECTS.some(kw => envSubject.includes(kw));
+            if (isPasswordReset) {
+              console.log("Skipping password reset:", fullMsg.envelope?.subject);
+              continue;
+            }
+
+            const parsed = await simpleParser(fullMsg.source, {
+              skipImageLinks: true,
+              skipTextLinks: true,
+            });
+
+            const bodyText = (parsed.text || "").trim();
+            const otpMatch = bodyText.match(/\b\d{4,8}\b/);
+            const otp = otpMatch ? otpMatch[0] : null;
+
+            emails.push({
+              id: String(uid),
+              subject: parsed.subject || fullMsg.envelope?.subject || "",
+              from: parsed.from?.text || "Netflix <info@account.netflix.com>",
+              to: parsed.to
+                ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
+                : undefined,
+              date: parsed.date,
+              otp,
+              preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
+              html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
+            });
+          } catch (parseErr) {
+            console.error("Parse error for UID", uid, ":", parseErr);
+          }
+        }
+
+        console.log("Collected", emails.length, "Netflix emails (password resets excluded)");
       } finally {
         lock.release();
       }
@@ -200,7 +216,7 @@ Deno.serve(async (req) => {
 
     emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-    // Save to cache — upsert all fetched emails
+    // Save to cache
     if (emails.length > 0) {
       console.log("Caching", emails.length, "emails to database");
       const rows = emails.map((e: any) => ({

@@ -1160,12 +1160,18 @@ function EmailViewer() {
       </main>
 
       <style>{`
-        .gmail-style-content { font-family: 'Inter', sans-serif; line-height: 1.6; color: #334155; font-size: 14px; overflow-x: auto; word-break: break-word; }
-        .gmail-style-content img { max-width: 100%; height: auto; }
+        .email-html-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+        .gmail-style-content { font-family: 'Inter', sans-serif; line-height: 1.6; color: #334155; font-size: 14px; word-break: break-word; }
+        .gmail-style-content img { max-width: 100%; height: auto; display: block; }
         .gmail-style-content a { color: #e11d48; text-decoration: underline; word-break: break-all; }
-        .gmail-style-content table { max-width: 100% !important; width: 100% !important; table-layout: fixed !important; }
+        .gmail-style-content table { border-collapse: collapse; }
         .gmail-style-content td, .gmail-style-content th { word-break: break-word !important; overflow-wrap: break-word !important; }
-        @media (max-width: 480px) { .gmail-style-content { font-size: 12px; } .gmail-style-content table { display: block !important; overflow-x: auto !important; } }
+        @media (max-width: 480px) {
+          .email-html-wrapper { margin: 0 -8px; padding: 0 4px; }
+          .gmail-style-content { font-size: 11px; }
+          .gmail-style-content table { transform: scale(0.85); transform-origin: top left; max-width: 118% !important; }
+          .gmail-style-content td { padding: 2px !important; }
+        }
       `}</style>
     </div>
   );
