@@ -866,15 +866,12 @@ function EmailViewer() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-  const fetchEmails = async () => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-    setLoading(true);
-    setError(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Load cached emails from DB (instant)
+  const loadCachedEmails = async () => {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-      console.log("[fetchEmails] Starting fetch to", `${getApiBase()}/functions/v1/fetch-emails`);
+      console.log("[loadCached] Loading from cache...");
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -882,56 +879,97 @@ function EmailViewer() {
           "Authorization": `Bearer ${getApiKey()}`,
           "apikey": getApiKey(),
         },
-        body: JSON.stringify({}),
-        signal: controller.signal,
+        body: JSON.stringify({ mode: "cache" }),
       });
-      clearTimeout(timeout);
-      console.log("[fetchEmails] Response status:", res.status);
       const raw = await res.text();
-      console.log("[fetchEmails] Raw response length:", raw.length, "chars");
       let data: any = null;
-      if (raw) {
-        try { data = JSON.parse(raw); } catch {
-          console.error("[fetchEmails] JSON parse failed, raw:", raw.substring(0, 200));
-          throw new Error(res.status === 400
-            ? "Inbox not configured. Ask admin to add IMAP settings."
-            : "Email service temporarily unavailable.");
-        }
-      }
-      if (!res.ok) throw new Error(data?.error || "Failed to fetch emails.");
-
+      if (raw) { try { data = JSON.parse(raw); } catch {} }
       const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[fetchEmails] Parsed", emailList.length, "emails");
+      console.log("[loadCached] Got", emailList.length, "cached emails");
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
-      setCountdown(refreshIntervalSeconds);
-      if (selectedEmail) {
-        const updated = emailList.find(e => e.id === selectedEmail.id);
-        if (updated) setSelectedEmail(updated);
+      return emailList.length;
+    } catch (err) {
+      console.error("[loadCached] Error:", err);
+      return 0;
+    }
+  };
+
+  // Sync from IMAP server (background, updates cache)
+  const syncFromImap = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setSyncing(true);
+    try {
+      console.log("[syncIMAP] Starting IMAP sync...");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        },
+        body: JSON.stringify({ mode: "sync" }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const raw = await res.text();
+      let data: any = null;
+      if (raw) { try { data = JSON.parse(raw); } catch {} }
+      if (!res.ok) {
+        const errMsg = data?.error || "Failed to sync emails.";
+        console.error("[syncIMAP] Error:", errMsg);
+        setError(errMsg);
+        return;
       }
+      const emailList = (Array.isArray(data) ? data : []) as Email[];
+      console.log("[syncIMAP] Synced", emailList.length, "emails from IMAP");
+      // Reload from cache to get all emails (including previously cached ones)
+      await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out (30s). Server may be slow. Try again.");
+        console.error("[syncIMAP] Timeout - will retry on next refresh");
       } else {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        console.error("[syncIMAP] Error:", err);
       }
-      console.error("[fetchEmails] Error:", err);
     } finally {
-      setLoading(false);
+      setSyncing(false);
       isFetchingRef.current = false;
     }
   };
 
+  // Manual refresh: instant cache load + background IMAP sync
+  const fetchEmails = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await loadCachedEmails();
+      // Trigger IMAP sync in background
+      syncFromImap();
+    } finally {
+      setLoading(false);
+      setCountdown(refreshIntervalSeconds);
+    }
+  };
+
   useEffect(() => {
-    fetchEmails();
+    // On mount: load cache instantly, then sync from IMAP
+    setLoading(true);
+    loadCachedEmails().then((count) => {
+      setLoading(false);
+      // Always sync on first load
+      syncFromImap();
+    });
     const interval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) { fetchEmails(); return refreshIntervalSeconds; }
+        if (prev <= 1) { syncFromImap().then(() => loadCachedEmails()); return refreshIntervalSeconds; }
         return prev - 1;
       });
     }, 1000);
-    const handleVisibility = () => { if (document.visibilityState === "visible") fetchEmails(); };
+    const handleVisibility = () => { if (document.visibilityState === "visible") { loadCachedEmails(); syncFromImap(); } };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => { clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
   }, []);
