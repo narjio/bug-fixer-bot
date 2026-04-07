@@ -19,7 +19,6 @@
     "@types/mailparser": "^3.4.6",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.4",
-    "connect-firestore": "^0.1.9",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
