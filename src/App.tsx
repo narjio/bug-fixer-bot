@@ -1159,12 +1159,18 @@ function EmailViewer() {
               <span className="text-[10px] sm:text-xs text-slate-500 truncate block max-w-[80px] sm:max-w-[150px]">{user.name}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button onClick={() => fetchEmails()}
               disabled={syncing}
               className="flex items-center p-2.5 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline ml-1.5">Refresh</span>
+            </button>
+            <button onClick={() => setShowChangePassword(true)}
+              className="flex items-center p-2.5 sm:px-3 sm:py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-full text-sm font-bold hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95 shadow-md shadow-purple-200"
+              title="Change Password">
+              <Key className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="hidden sm:inline ml-1.5">Password</span>
             </button>
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
               <LogOut className="w-5 h-5 text-slate-400" />
