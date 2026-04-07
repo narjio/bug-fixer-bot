@@ -11,6 +11,12 @@ const OTP_SERVICE_FALLBACK = {
   key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ",
 };
 
+function getCloudflareWorkerUrl() {
+  const url = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+  if (url && url !== "undefined" && url !== "null") return url;
+  return ""; // empty = fallback to Supabase directly
+}
+
 function getRuntimeValue(value: string | undefined, fallback: string) {
   if (!value || value === "undefined" || value === "null") return fallback;
   return value;
@@ -867,15 +873,23 @@ function EmailViewer() {
   // Load cached emails from DB (instant)
   const loadCachedEmails = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${getApiKey()}`,
-          "apikey": getApiKey(),
-        },
-        body: JSON.stringify({ mode: "cache" }),
-      });
+      const cfUrl = getCloudflareWorkerUrl();
+      let res: Response;
+      if (cfUrl) {
+        // Use Cloudflare Worker (zero Supabase egress)
+        res = await fetch(`${cfUrl}/api/emails`);
+      } else {
+        // Fallback to Supabase directly
+        res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getApiKey()}`,
+            "apikey": getApiKey(),
+          },
+          body: JSON.stringify({ mode: "cache" }),
+        });
+      }
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
@@ -896,28 +910,38 @@ function EmailViewer() {
     isFetchingRef.current = true;
     setSyncing(true);
     try {
+      const cfUrl = getCloudflareWorkerUrl();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 50000);
-      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${getApiKey()}`,
-          "apikey": getApiKey(),
-        },
-        body: JSON.stringify({ mode: "sync" }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const raw = await res.text();
-      let data: any = null;
-      if (raw) { try { data = JSON.parse(raw); } catch {} }
-      if (!res.ok) {
-        const errMsg = data?.error || "Failed to sync emails.";
-        setError(errMsg);
-        return;
+      
+      if (cfUrl) {
+        // Use Cloudflare Worker to trigger sync
+        await fetch(`${cfUrl}/api/emails/sync`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+      } else {
+        // Fallback to Supabase directly
+        const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getApiKey()}`,
+            "apikey": getApiKey(),
+          },
+          body: JSON.stringify({ mode: "sync" }),
+          signal: controller.signal,
+        });
+        const raw = await res.text();
+        let data: any = null;
+        if (raw) { try { data = JSON.parse(raw); } catch {} }
+        if (!res.ok) {
+          const errMsg = data?.error || "Failed to sync emails.";
+          setError(errMsg);
+        }
       }
-      // After IMAP sync, reload from cache to get full list
+      clearTimeout(timeout);
+      // After sync, reload from cache
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -930,6 +954,8 @@ function EmailViewer() {
       isFetchingRef.current = false;
     }
   };
+
+
 
   // Manual refresh: instant cache load + background IMAP sync
   const fetchEmails = async () => {
