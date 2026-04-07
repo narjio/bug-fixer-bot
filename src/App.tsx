@@ -1256,78 +1256,9 @@ function EmailViewer() {
           max-width: 100%;
           width: 100%;
         }
-        .gmail-style-content {
-          font-family: 'Inter', sans-serif;
-          line-height: 1.6;
-          color: #334155;
-          font-size: 14px;
-          word-break: break-word;
-          overflow-wrap: break-word;
-          max-width: 100%;
-        }
-        .gmail-style-content * {
-          max-width: 100% !important;
-          box-sizing: border-box !important;
-        }
-        .gmail-style-content img {
-          max-width: 100% !important;
-          height: auto !important;
+        .email-html-wrapper iframe {
           display: block;
-        }
-        .gmail-style-content a {
-          color: #e11d48;
-          text-decoration: underline;
-          word-break: break-all;
-        }
-        .gmail-style-content table {
-          border-collapse: collapse;
-          width: 100% !important;
-          max-width: 100% !important;
-          table-layout: fixed !important;
-        }
-        .gmail-style-content td,
-        .gmail-style-content th {
-          word-break: break-word !important;
-          overflow-wrap: break-word !important;
-          max-width: 100% !important;
-          overflow: hidden !important;
-        }
-        .gmail-style-content div,
-        .gmail-style-content span,
-        .gmail-style-content p {
-          max-width: 100% !important;
-          overflow-wrap: break-word !important;
-        }
-        @media (max-width: 640px) {
-          .email-html-wrapper {
-            margin: 0;
-            padding: 0;
-          }
-          .gmail-style-content {
-            font-size: 13px;
-          }
-          .gmail-style-content table {
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-          .gmail-style-content td,
-          .gmail-style-content th {
-            padding: 4px 2px !important;
-            display: block !important;
-            width: 100% !important;
-            box-sizing: border-box !important;
-          }
-          .gmail-style-content td img,
-          .gmail-style-content th img {
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-          .gmail-style-content [style*="width"],
-          .gmail-style-content [style*="min-width"] {
-            width: 100% !important;
-            min-width: 0 !important;
-            max-width: 100% !important;
-          }
+          width: 100%;
         }
       `}</style>
     </div>
