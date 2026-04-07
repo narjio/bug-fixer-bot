@@ -1045,7 +1045,7 @@ function EmailViewer() {
               </div>
             </section>
 
-            <section>
+            <section className="mt-4 flex-1 overflow-y-auto min-h-0 flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                   Inbox
