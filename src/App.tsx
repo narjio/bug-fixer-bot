@@ -873,15 +873,23 @@ function EmailViewer() {
   // Load cached emails from DB (instant)
   const loadCachedEmails = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${getApiKey()}`,
-          "apikey": getApiKey(),
-        },
-        body: JSON.stringify({ mode: "cache" }),
-      });
+      const cfUrl = getCloudflareWorkerUrl();
+      let res: Response;
+      if (cfUrl) {
+        // Use Cloudflare Worker (zero Supabase egress)
+        res = await fetch(`${cfUrl}/api/emails`);
+      } else {
+        // Fallback to Supabase directly
+        res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getApiKey()}`,
+            "apikey": getApiKey(),
+          },
+          body: JSON.stringify({ mode: "cache" }),
+        });
+      }
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
