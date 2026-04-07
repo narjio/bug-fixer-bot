@@ -1273,16 +1273,72 @@ import { QRCodeSVG } from "qrcode.react";
 // ==================== MAIN APP ====================
 export default function App() {
   useEffect(() => {
+    // Anti-devtools: detect and crash
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
     document.addEventListener("contextmenu", handleContextMenu);
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F12" || (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) || (e.ctrlKey && e.key === "U")) {
         e.preventDefault();
-        window.location.reload();
+        _nuke();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
-    return () => { document.removeEventListener("contextmenu", handleContextMenu); document.removeEventListener("keydown", handleKeyDown); };
+
+    // Devtools size detection (works on desktop browsers)
+    const _threshold = 160;
+    const _checkDevtools = () => {
+      const w = window.outerWidth - window.innerWidth > _threshold;
+      const h = window.outerHeight - window.innerHeight > _threshold;
+      if (w || h) _nuke();
+    };
+
+    // Debugger trap via console timing
+    const _checkDebugger = () => {
+      const start = performance.now();
+      // eslint-disable-next-line no-debugger
+      debugger;
+      if (performance.now() - start > 100) _nuke();
+    };
+
+    // Nuke: wipe everything and crash
+    function _nuke() {
+      try { localStorage.clear(); sessionStorage.clear(); } catch {}
+      document.head.innerHTML = "";
+      document.body.innerHTML = '<div style="background:#000;color:#f00;height:100vh;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:24px;text-align:center;padding:20px">⛔ ACCESS DENIED ⛔<br><br>Unauthorized activity detected.<br>Session terminated.</div>';
+      // Prevent recovery
+      setTimeout(() => { window.location.href = "about:blank"; }, 1500);
+    }
+
+    // Disable text selection & drag
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    document.addEventListener("selectstart", (e) => e.preventDefault());
+    document.addEventListener("dragstart", (e) => e.preventDefault());
+
+    // Console log trap - overwrite console to prevent extraction
+    const _origLog = console.log;
+    const _origWarn = console.warn;
+    const _origError = console.error;
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.table = () => {};
+    console.dir = () => {};
+    console.trace = () => {};
+
+    const devtoolsInterval = setInterval(_checkDevtools, 1000);
+    const debuggerInterval = setInterval(_checkDebugger, 3000);
+
+    return () => {
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+      clearInterval(devtoolsInterval);
+      clearInterval(debuggerInterval);
+      console.log = _origLog;
+      console.warn = _origWarn;
+      console.error = _origError;
+    };
   }, []);
 
   return (
