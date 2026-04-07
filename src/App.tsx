@@ -328,7 +328,7 @@ function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [siteKey, setSiteKey] = useState<string | null>(null);
-  const [showCaptchaModal, setShowCaptchaModal] = useState(false);
+  const [showCaptcha, setShowCaptcha] = useState(false);
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
 
@@ -343,10 +343,10 @@ function AdminLoginPage() {
 
   const initiateLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (siteKey) { setShowCaptchaModal(true); } else { executeLogin(); }
+    if (siteKey) { setShowCaptcha(true); } else { executeLogin(); }
   };
 
-  const executeLogin = async (captchaToken?: string) => {
+  const executeLogin = async () => {
     setLoading(true);
     setError("");
     try {
@@ -377,17 +377,10 @@ function AdminLoginPage() {
     }
   };
 
-  const handleCaptchaSolve = (token: string | null) => {
-    if (token) { setShowCaptchaModal(false); executeLogin(token); }
-  };
-
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-2xl border-t-4 sm:border-t-8 border-red-600 mx-2 sm:mx-0"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+        className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-2xl border-t-4 sm:border-t-8 border-red-600 mx-2 sm:mx-0">
         <div className="flex justify-center mb-8">
           <div className="bg-slate-900 p-3 sm:p-4 rounded-2xl shadow-lg">
             <ShieldCheck className="text-white w-6 h-6 sm:w-8 sm:h-8" />
@@ -435,21 +428,8 @@ function AdminLoginPage() {
       </motion.div>
 
       <AnimatePresence>
-        {showCaptchaModal && siteKey && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white p-6 rounded-3xl shadow-2xl relative">
-              <button onClick={() => setShowCaptchaModal(false)}
-                className="absolute -top-3 -right-3 bg-white text-slate-400 hover:text-slate-900 rounded-full p-1 shadow-md border">
-                <X className="w-5 h-5" />
-              </button>
-              <h3 className="text-center font-bold text-slate-800 mb-4">Security Check</h3>
-              <div className="flex justify-center">
-                <ReCAPTCHA sitekey={siteKey} onChange={handleCaptchaSolve} />
-              </div>
-            </motion.div>
-          </motion.div>
+        {showCaptcha && siteKey && (
+          <CaptchaModal siteKey={siteKey} onVerify={() => { setShowCaptcha(false); executeLogin(); }} onCancel={() => setShowCaptcha(false)} />
         )}
       </AnimatePresence>
     </div>
