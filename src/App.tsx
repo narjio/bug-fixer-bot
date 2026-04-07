@@ -239,6 +239,27 @@ function UserLoginPage() {
 
       localStorage.setItem("user", JSON.stringify(userData));
       await checkAuth();
+
+      // Send login notification with location to Telegram
+      try {
+        await fetch("/api/auth/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            username: userData.username,
+            name: userData.name,
+            status: "success",
+            lat: loc.lat,
+            lon: loc.lon,
+            city: loc.city,
+            state: loc.state,
+          }),
+        });
+      } catch (notifyErr) {
+        console.error("Failed to send login notification:", notifyErr);
+      }
+
       navigate("/viewer");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
@@ -411,6 +432,26 @@ function AdminLoginPage() {
 
       localStorage.setItem("user", JSON.stringify(userData));
       await checkAuth();
+
+      // Send login notification with location to Telegram
+      try {
+        await fetch("/api/auth/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            username: userData.username,
+            name: userData.name,
+            status: "success",
+            lat: loc.lat,
+            lon: loc.lon,
+            city: loc.city,
+            state: loc.state,
+          }),
+        });
+      } catch (notifyErr) {
+        console.error("Failed to send login notification:", notifyErr);
+      }
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
