@@ -1121,7 +1121,7 @@ function EmailViewer() {
                         <p className="text-[10px] sm:text-xs text-slate-500 truncate">{selectedEmail.from}</p>
                       </div>
                     </div>
-                    <p className="text-[10px] sm:text-xs text-slate-400">{new Date(selectedEmail.date).toLocaleString()}</p>
+                    <p className="text-[10px] sm:text-xs text-slate-400">{new Date(selectedEmail.date).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}</p>
                   </div>
                 </div>
 
