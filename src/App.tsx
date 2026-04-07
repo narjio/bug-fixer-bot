@@ -490,19 +490,20 @@ function AdminAuthPage() {
     if (step === 1 && !otpRequested.current) {
       otpRequested.current = true;
       setLoading(true);
-      try {
-        // Generate OTP and store in Firestore
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        await setDoc(doc(db, "otps", user.id), { otp, createdAt: serverTimestamp() });
-        setLoading(false);
-        toast.success("OTP generated. Check your admin OTP in Firestore or Telegram.");
-      } catch (err) {
-        setLoading(false);
-        const errorMsg = err instanceof Error ? err.message : "Failed to generate OTP";
-        setError(errorMsg);
-        toast.error(errorMsg);
-        otpRequested.current = false;
-      }
+      (async () => {
+        try {
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+          await setDoc(doc(db, "otps", user.id), { otp, createdAt: serverTimestamp() });
+          setLoading(false);
+          toast.success("OTP generated. Check your admin OTP in Firestore or Telegram.");
+        } catch (err) {
+          setLoading(false);
+          const errorMsg = err instanceof Error ? err.message : "Failed to generate OTP";
+          setError(errorMsg);
+          toast.error(errorMsg);
+          otpRequested.current = false;
+        }
+      })();
     }
     if (step === 2 && !user.totpSecret) {
       const secret = generateSecret();
