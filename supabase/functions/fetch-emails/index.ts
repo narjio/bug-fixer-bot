@@ -35,7 +35,11 @@ Deno.serve(async (req) => {
 
     // Wrap entire IMAP operation in a timeout to ensure we respond before edge function limit
     const emails: any[] = [];
+    const seenIds = new Set<number>();
     let timedOut = false;
+    const MAX_RETURNED_EMAILS = 20;
+    const BATCH_SIZE = 8;
+    const MAX_SCAN_MESSAGES = 80;
 
     const timeoutPromise = new Promise<void>((resolve) => {
       setTimeout(() => {
@@ -63,56 +67,73 @@ Deno.serve(async (req) => {
           console.log("Total messages:", totalMessages);
 
           if (totalMessages > 0) {
-            // Only fetch last 8 messages to stay within timeout
-            const startSeq = Math.max(1, totalMessages - 7);
-            const range = `${startSeq}:${totalMessages}`;
-            console.log("Fetching range:", range);
+            const oldestSeqToScan = Math.max(1, totalMessages - MAX_SCAN_MESSAGES + 1);
+            let currentEnd = totalMessages;
 
-            for await (const message of client.fetch(range, { source: true })) {
-              if (timedOut) {
-                console.log("Timeout reached, returning collected emails");
-                break;
-              }
-              if (!message.source) continue;
+            while (
+              currentEnd >= oldestSeqToScan &&
+              emails.length < MAX_RETURNED_EMAILS &&
+              !timedOut
+            ) {
+              const currentStart = Math.max(oldestSeqToScan, currentEnd - BATCH_SIZE + 1);
+              const range = `${currentStart}:${currentEnd}`;
+              console.log("Fetching range:", range);
 
-              try {
-                const parsed = await simpleParser(message.source);
-                const subject = parsed.subject || "";
-                const bodyText = parsed.text || "";
-                const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
-
-                // Skip password reset emails only
-                const isPasswordReset = PASSWORD_RESET_KEYWORDS.some(kw =>
-                  normalizedContent.includes(kw)
-                );
-                if (isPasswordReset) {
-                  console.log("Skipping password reset:", subject);
-                  continue;
+              for await (const message of client.fetch(range, { source: true })) {
+                if (timedOut || emails.length >= MAX_RETURNED_EMAILS) {
+                  console.log("Timeout/result limit reached, returning collected emails");
+                  break;
                 }
 
-                const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
-                const otp = otpMatch ? otpMatch[0] : null;
+                if (!message.source || seenIds.has(message.uid)) continue;
+                seenIds.add(message.uid);
 
-                emails.push({
-                  id: message.uid,
-                  subject: parsed.subject,
-                  from: parsed.from?.text,
-                  to: parsed.to
-                    ? Array.isArray(parsed.to)
-                      ? parsed.to[0]?.text
-                      : parsed.to.text
-                    : undefined,
-                  date: parsed.date,
-                  otp,
-                  preview: bodyText.length > 100
-                    ? `${bodyText.substring(0, 100)}...`
-                    : bodyText,
-                  html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
-                });
-              } catch (parseErr) {
-                console.error("Failed to parse message:", parseErr);
+                try {
+                  const parsed = await simpleParser(message.source, {
+                    skipImageLinks: true,
+                    skipTextLinks: true,
+                  });
+                  const subject = (parsed.subject || "").trim();
+                  const bodyText = (parsed.text || "").trim();
+                  const fromText = parsed.from?.text || "";
+                  const normalizedContent = `${subject}\n${fromText}\n${bodyText}`.toLowerCase();
+
+                  // Skip password reset emails only
+                  const isPasswordReset = PASSWORD_RESET_KEYWORDS.some((kw) =>
+                    normalizedContent.includes(kw)
+                  );
+                  if (isPasswordReset) {
+                    console.log("Skipping password reset:", subject);
+                    continue;
+                  }
+
+                  const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
+                  const otp = otpMatch ? otpMatch[0] : null;
+
+                  emails.push({
+                    id: message.uid,
+                    subject: parsed.subject,
+                    from: parsed.from?.text,
+                    to: parsed.to
+                      ? Array.isArray(parsed.to)
+                        ? parsed.to[0]?.text
+                        : parsed.to.text
+                      : undefined,
+                    date: parsed.date,
+                    otp,
+                    preview: bodyText.length > 100
+                      ? `${bodyText.substring(0, 100)}...`
+                      : bodyText,
+                    html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
+                  });
+                } catch (parseErr) {
+                  console.error("Failed to parse message:", parseErr);
+                }
               }
+
+              currentEnd = currentStart - 1;
             }
+
             console.log("Collected", emails.length, "emails");
           }
         } finally {
