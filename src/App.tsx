@@ -145,7 +145,7 @@ function UserLoginPage() {
             <Mail className="text-white w-8 h-8" />
           </div>
         </div>
-        <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Netflix OTP Access</h2>
+        <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Secure OTP Access</h2>
         <p className="text-slate-500 text-center text-sm mb-8">Enter your credentials to continue</p>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -671,6 +671,20 @@ function AdminPanel() {
   const [newName, setNewName] = useState("");
   const [siteKey, setSiteKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
+  
+  // Server Config State
+  const [serverConfig, setServerConfig] = useState({
+    TELEGRAM_BOT_TOKEN: "",
+    TELEGRAM_CHAT_ID: "",
+    IMAP_HOST: "",
+    IMAP_PORT: "",
+    IMAP_USER: "",
+    IMAP_PASSWORD: "",
+    ADMIN_EMAIL: "",
+    ADMIN_PASSWORD: ""
+  });
+  const [savingConfig, setSavingConfig] = useState(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -683,6 +697,11 @@ function AdminPanel() {
         setSiteKey(settingsDoc.data().siteKey || "");
         setSecretKey(settingsDoc.data().secretKey || "");
       }
+
+      const configDoc = await getDoc(doc(db, "settings", "config"));
+      if (configDoc.exists()) {
+        setServerConfig(prev => ({ ...prev, ...configDoc.data() }));
+      }
     };
     fetchData();
   }, []);
@@ -690,6 +709,18 @@ function AdminPanel() {
   const saveRecaptchaSettings = async () => {
     await setDoc(doc(db, "settings", "recaptcha"), { siteKey, secretKey }, { merge: true });
     toast.success("ReCAPTCHA settings saved successfully!");
+  };
+
+  const saveServerConfig = async () => {
+    setSavingConfig(true);
+    try {
+      await setDoc(doc(db, "settings", "config"), serverConfig, { merge: true });
+      toast.success("Server configuration saved! Changes apply immediately.");
+    } catch (err) {
+      toast.error("Failed to save config: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSavingConfig(false);
+    }
   };
 
   const createUser = async () => {
@@ -814,7 +845,95 @@ function AdminPanel() {
           </section>
         </div>
 
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
+          <section className="bg-white p-6 rounded-3xl border shadow-sm">
+            <h2 className="font-black text-lg mb-6 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-red-600" />
+              Server Configuration (Database)
+            </h2>
+            <p className="text-sm text-slate-500 mb-6">These settings override the default server configuration in real-time. Leave blank to use defaults.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="space-y-4">
+                <h3 className="font-bold text-slate-800 border-b pb-2">Telegram Bot</h3>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Bot Token</label>
+                  <input
+                    type="password"
+                    placeholder="e.g. 8575582532:AAE..."
+                    value={serverConfig.TELEGRAM_BOT_TOKEN}
+                    onChange={(e) => setServerConfig({...serverConfig, TELEGRAM_BOT_TOKEN: e.target.value})}
+                    className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Chat ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 769748540"
+                    value={serverConfig.TELEGRAM_CHAT_ID}
+                    onChange={(e) => setServerConfig({...serverConfig, TELEGRAM_CHAT_ID: e.target.value})}
+                    className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="font-bold text-slate-800 border-b pb-2">IMAP Server (Email Fetching)</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Host</label>
+                    <input
+                      type="text"
+                      placeholder="imap.gmail.com"
+                      value={serverConfig.IMAP_HOST}
+                      onChange={(e) => setServerConfig({...serverConfig, IMAP_HOST: e.target.value})}
+                      className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Port</label>
+                    <input
+                      type="text"
+                      placeholder="993"
+                      value={serverConfig.IMAP_PORT}
+                      onChange={(e) => setServerConfig({...serverConfig, IMAP_PORT: e.target.value})}
+                      className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">IMAP User (Email)</label>
+                  <input
+                    type="text"
+                    placeholder="Email Address"
+                    value={serverConfig.IMAP_USER}
+                    onChange={(e) => setServerConfig({...serverConfig, IMAP_USER: e.target.value})}
+                    className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">IMAP App Password</label>
+                  <input
+                    type="password"
+                    placeholder="16-digit App Password"
+                    value={serverConfig.IMAP_PASSWORD}
+                    onChange={(e) => setServerConfig({...serverConfig, IMAP_PASSWORD: e.target.value})}
+                    className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={saveServerConfig}
+              disabled={savingConfig}
+              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-slate-800 transition-all disabled:opacity-50"
+            >
+              {savingConfig ? "Saving..." : "Save Server Configuration"}
+            </button>
+          </section>
+
           <section className="bg-white p-6 rounded-3xl border shadow-sm h-full">
             <h2 className="font-black text-lg mb-6 flex items-center gap-2">
               <Users className="w-5 h-5 text-red-600" />
@@ -912,7 +1031,7 @@ function EmailViewer() {
             <div className="bg-red-600 p-2 rounded-lg">
               <Mail className="text-white w-5 h-5" />
             </div>
-            <h1 className="font-bold text-xl tracking-tight hidden sm:block">Netflix OTP Viewer</h1>
+            <h1 className="font-bold text-xl tracking-tight hidden sm:block">Secure OTP Viewer</h1>
             <div className="ml-4 flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-bold text-slate-600">{user.name}</span>
@@ -947,7 +1066,7 @@ function EmailViewer() {
               </div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800">System Active</h2>
-                <p className="text-xs text-slate-500">Monitoring Netflix OTPs securely</p>
+                <p className="text-xs text-slate-500">Monitoring OTPs securely</p>
               </div>
             </section>
 
@@ -976,7 +1095,7 @@ function EmailViewer() {
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
                       <Clock className="text-slate-200 w-6 h-6" />
                     </div>
-                    <p className="text-xs text-slate-400 font-medium">Waiting for Netflix OTP emails...</p>
+                    <p className="text-xs text-slate-400 font-medium">Waiting for OTP emails...</p>
                   </div>
                 ) : (
                   emails.map((email) => (
@@ -991,7 +1110,7 @@ function EmailViewer() {
                     >
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-[10px] font-bold text-red-600 uppercase tracking-tight">
-                          Netflix Official
+                          System Official
                         </span>
                         <span className="text-[10px] text-slate-400">
                           {new Date(email.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1048,7 +1167,7 @@ function EmailViewer() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-slate-900">Netflix Support</span>
+                          <span className="font-bold text-sm text-slate-900">System Support</span>
                           <span className="text-xs text-slate-400">Verified Sender</span>
                         </div>
                         <p className="text-xs text-slate-500 italic">Recipient: Protected Account</p>
