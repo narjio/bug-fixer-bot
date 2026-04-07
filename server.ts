@@ -14,6 +14,14 @@ import session from "express-session";
 import cookieParser from "cookie-parser";
 import { FirestoreStore } from "connect-firestore";
 
+declare global {
+  namespace Express {
+    interface Request {
+      session: any;
+    }
+  }
+}
+
 dotenv.config();
 
 // Initialize Firebase Admin

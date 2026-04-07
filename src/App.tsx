@@ -509,20 +509,22 @@ function AdminAuthPage() {
       otpRequested.current = true;
       setLoading(true);
       fetch("/api/admin/request-otp", { method: "POST" })
-        .then(res => res.json())
-        .then(data => {
+        .then(async res => {
+          const data = await res.json();
           setLoading(false);
-          if (data.error) {
-            setError(data.error);
-            toast.error(data.error);
+          if (!res.ok) {
+            setError(data.error || "Failed to request OTP");
+            toast.error(data.error || "Failed to request OTP");
             otpRequested.current = false; // Allow retry on error
           } else {
             toast.success("Secure OTP sent to Telegram");
           }
         })
-        .catch(() => {
+        .catch((err) => {
           setLoading(false);
-          setError("Failed to request OTP");
+          const errorMsg = err instanceof Error ? err.message : "Failed to request OTP";
+          setError(errorMsg);
+          toast.error(errorMsg);
           otpRequested.current = false; // Allow retry on error
         });
     }
