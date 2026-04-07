@@ -19,7 +19,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Get IMAP config from app_settings first, then env vars
     let imapHost = "";
     let imapPort = 993;
     let imapUser = "";
@@ -78,34 +77,18 @@ Deno.serve(async (req) => {
       const lock = await client.getMailboxLock("INBOX");
 
       try {
-        const totalMessages = (client.mailbox as any)?.exists || 0;
-        console.log("Total messages:", totalMessages);
+        // IMAP SEARCH for emails FROM info@account.netflix.com only
+        console.log("Searching for Netflix emails (from: info@account.netflix.com)...");
+        const searchResults = await client.search({ from: "info@account.netflix.com" });
+        console.log("Found", searchResults.length, "Netflix emails total");
 
-        if (totalMessages > 0) {
-          // Fetch last 8 messages only - keeps it fast
-          const startSeq = Math.max(1, totalMessages - 7);
-          const range = `${startSeq}:${totalMessages}`;
-          console.log("Fetching range:", range);
-
-          // Step 1: Fetch envelope data only (very fast, no body download)
-          const envelopes: any[] = [];
-          for await (const message of client.fetch(range, { envelope: true, uid: true })) {
-            envelopes.push(message);
-          }
-          console.log("Got", envelopes.length, "envelopes");
-
-          // Step 2: Filter out password reset emails by subject
-          const validMessages = envelopes.filter(msg => {
-            const subject = (msg.envelope?.subject || "").toLowerCase();
-            return !PASSWORD_RESET_KEYWORDS.some(kw => subject.includes(kw));
-          });
-          console.log("After filter:", validMessages.length, "messages");
-
-          // Step 3: Fetch full source only for filtered messages (max 8)
-          for (const msg of validMessages.slice(0, 8)) {
+        if (searchResults.length > 0) {
+          // Take only last 20 UIDs (most recent)
+          const recentUids = searchResults.slice(-20);
+          
+          for (const uid of recentUids) {
             try {
-              // Fetch source for this specific UID
-              const fullMsg = await client.fetchOne(msg.uid, { source: true }, { uid: true });
+              const fullMsg = await client.fetchOne(uid, { source: true }, { uid: true });
               if (!fullMsg?.source) continue;
 
               const parsed = await simpleParser(fullMsg.source, {
@@ -113,30 +96,43 @@ Deno.serve(async (req) => {
                 skipTextLinks: true,
               });
 
+              const subject = (parsed.subject || "").trim();
               const bodyText = (parsed.text || "").trim();
+              const fromText = parsed.from?.text || "";
+              const normalizedContent = `${subject}\n${fromText}\n${bodyText}`.toLowerCase();
+
+              // Skip password reset emails
+              const isPasswordReset = PASSWORD_RESET_KEYWORDS.some((kw) =>
+                normalizedContent.includes(kw)
+              );
+              if (isPasswordReset) {
+                console.log("Skipping password reset:", subject);
+                continue;
+              }
+
               const otpMatch = bodyText.match(/\b\d{4,8}\b/);
               const otp = otpMatch ? otpMatch[0] : null;
 
               emails.push({
-                id: msg.uid,
-                subject: parsed.subject || msg.envelope?.subject,
-                from: parsed.from?.text || msg.envelope?.from?.[0]?.address,
+                id: uid,
+                subject: parsed.subject,
+                from: parsed.from?.text,
                 to: parsed.to
                   ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
-                  : msg.envelope?.to?.[0]?.address,
-                date: parsed.date || msg.envelope?.date,
+                  : undefined,
+                date: parsed.date,
                 otp,
                 preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
                 html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
               });
-              console.log("Added email:", parsed.subject || msg.envelope?.subject);
+              console.log("Added Netflix email:", subject);
             } catch (parseErr) {
-              console.error("Parse error for UID", msg.uid, ":", parseErr);
+              console.error("Parse error for UID", uid, ":", parseErr);
             }
           }
         }
 
-        console.log("Collected", emails.length, "emails");
+        console.log("Collected", emails.length, "Netflix emails (password reset excluded)");
       } finally {
         lock.release();
       }
