@@ -235,12 +235,7 @@ function ProfileSelectPage() {
               </div>
             )}
 
-            <button
-              onClick={() => navigate("/admin-login")}
-              className="block mx-auto mt-10 text-slate-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors"
-            >
-              Admin Access →
-            </button>
+            {/* Admin access hidden - use /admin directly */}
           </motion.div>
         ) : (
           <motion.div
