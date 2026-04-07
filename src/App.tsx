@@ -1067,7 +1067,8 @@ function EmailViewer() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [otpCopied, setOtpCopied] = useState(false);
-  const [countdown, setCountdown] = useState(30);
+  const refreshIntervalSeconds = 5;
+  const [countdown, setCountdown] = useState(refreshIntervalSeconds);
   const navigate = useNavigate();
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -1079,8 +1080,25 @@ function EmailViewer() {
     try {
       const response = await fetch("/api/emails", {
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       });
-      const data = await safeJson(response);
+      const raw = await response.text();
+      let data: any = null;
+
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          console.error("Inbox API returned non-JSON:", raw.slice(0, 200));
+          throw new Error(
+            response.status === 400
+              ? "Inbox is not configured yet. Ask admin to add IMAP email settings."
+              : "Email service is temporarily unavailable."
+          );
+        }
+      }
 
       if (!response.ok) {
         throw new Error(data?.error || "Failed to fetch emails.");
@@ -1090,7 +1108,7 @@ function EmailViewer() {
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
-      setCountdown(30);
+      setCountdown(refreshIntervalSeconds);
       
       if (selectedEmail) {
         const updated = emailList.find((e: Email) => e.id === selectedEmail.id);
@@ -1109,12 +1127,30 @@ function EmailViewer() {
       setCountdown((prev) => {
         if (prev <= 1) {
           fetchEmails();
-          return 30;
+          return refreshIntervalSeconds;
         }
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(interval);
+
+    const handleFocusRefresh = () => {
+      fetchEmails();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchEmails();
+      }
+    };
+
+    window.addEventListener("focus", handleFocusRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocusRefresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   const handleManualRefresh = () => {

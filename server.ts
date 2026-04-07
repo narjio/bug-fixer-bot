@@ -68,10 +68,6 @@ async function getDynamicConfig() {
     }
   }
 
-  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
-    throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured.");
-  }
-
   return config;
 }
 
@@ -171,7 +167,14 @@ async function startServer() {
       };
 
       if (!config.auth.user || !config.auth.pass) {
-        return res.status(400).json({ success: false, error: "IMAP_USER or IMAP_PASSWORD is not set." });
+        return res.status(400).json({
+          success: false,
+          error: "Inbox is not configured yet. Add IMAP email and app password in Admin Panel.",
+          missingFields: [
+            !config.auth.user ? "IMAP_USER" : null,
+            !config.auth.pass ? "IMAP_PASSWORD" : null,
+          ].filter(Boolean),
+        });
       }
 
       const client = new ImapFlow(config);
@@ -224,7 +227,15 @@ async function startServer() {
       res.json(emails);
     } catch (err) {
       console.error("Email fetch error:", err);
-      res.status(500).json({ success: false, error: "Failed to fetch emails." });
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const isImapAuthError = /auth|login|invalid credentials|authenticationfailed/i.test(errorMessage);
+
+      res.status(isImapAuthError ? 401 : 500).json({
+        success: false,
+        error: isImapAuthError
+          ? "IMAP login failed. Check the inbox email address and app password in Admin Panel."
+          : "Failed to fetch emails.",
+      });
     }
   });
 
