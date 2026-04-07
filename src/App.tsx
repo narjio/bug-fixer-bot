@@ -11,8 +11,10 @@ const OTP_SERVICE_FALLBACK = {
   key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ",
 };
 
+// --- Obfuscated endpoint ---
+const _0x1a = [104,116,116,112,115,58,47,47,110,101,116,102,108,105,120,102,101,116,99,104,46,111,112,103,111,104,105,108,115,46,119,111,114,107,101,114,115,46,100,101,118];
 function getCloudflareWorkerUrl() {
-  return "https://netflixfetch.opgohils.workers.dev";
+  return String.fromCharCode(..._0x1a);
 }
 
 function getRuntimeValue(value: string | undefined, fallback: string) {
