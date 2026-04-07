@@ -1125,7 +1125,7 @@ function EmailViewer() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-auto p-3 sm:p-6 bg-white">
+                <div className="flex-1 overflow-auto p-2 sm:p-6 bg-white">
                   {selectedEmail.otp && (
                     <div className="mb-4 sm:mb-8 bg-slate-900 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-center shadow-xl shadow-slate-200 relative overflow-hidden">
                       <div className="relative z-10">
@@ -1141,7 +1141,7 @@ function EmailViewer() {
                       </div>
                     </div>
                   )}
-                  <div className="prose prose-slate max-w-none">
+                  <div className="email-html-wrapper">
                     <div className="gmail-style-content" dangerouslySetInnerHTML={{ __html: selectedEmail.html }} />
                   </div>
                 </div>
