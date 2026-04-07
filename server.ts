@@ -9,31 +9,20 @@ import fetch from "node-fetch";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, collection, query, where, addDoc, getDocs } from "firebase/firestore";
 import { readFileSync } from 'fs';
-import path from 'path';
-
-const firebaseConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
-import admin from "firebase-admin";
 import session from "express-session";
 import cookieParser from "cookie-parser";
-import { FirestoreStore } from "connect-firestore";
 
-declare global {
-  namespace Express {
-    interface Request {
-      session: any;
-    }
+declare module "express-session" {
+  interface SessionData {
+    user: any;
   }
 }
 
 dotenv.config();
 
-// Initialize Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.applicationDefault()
-});
-const firestore = admin.firestore();
+const firebaseConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
 
-// Load Firebase config gracefully via import so Vercel bundles it
+// Load Firebase config gracefully
 let db: any = null;
 try {
   if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
@@ -46,19 +35,18 @@ try {
 }
 
 // --- DYNAMIC CONFIGURATION ---
-// Helper to get the latest config, merging Environment Variables with Firestore Database
 async function getDynamicConfig() {
   const cleanEnv = (val: string | undefined) => (val && val !== "undefined" && val.trim() !== "") ? val.trim() : null;
 
   let config = {
-    TELEGRAM_BOT_TOKEN: cleanEnv(process.env.TELEGRAM_BOT_TOKEN), 
-    TELEGRAM_CHAT_ID: cleanEnv(process.env.TELEGRAM_CHAT_ID) || "769748540", 
-    ADMIN_EMAIL: cleanEnv(process.env.ADMIN_EMAIL) || "admin@example.com", 
-    ADMIN_PASSWORD: cleanEnv(process.env.ADMIN_INITIAL_PASSWORD) || "admin123", 
+    TELEGRAM_BOT_TOKEN: cleanEnv(process.env.TELEGRAM_BOT_TOKEN),
+    TELEGRAM_CHAT_ID: cleanEnv(process.env.TELEGRAM_CHAT_ID) || "769748540",
+    ADMIN_EMAIL: cleanEnv(process.env.ADMIN_EMAIL) || "admin@example.com",
+    ADMIN_PASSWORD: cleanEnv(process.env.ADMIN_INITIAL_PASSWORD) || "admin123",
     IMAP_HOST: cleanEnv(process.env.IMAP_HOST) || "imap.gmail.com",
     IMAP_PORT: parseInt(cleanEnv(process.env.IMAP_PORT) || "993"),
-    IMAP_USER: cleanEnv(process.env.IMAP_USER) || "", 
-    IMAP_PASSWORD: cleanEnv(process.env.IMAP_PASSWORD) || "", 
+    IMAP_USER: cleanEnv(process.env.IMAP_USER) || "",
+    IMAP_PASSWORD: cleanEnv(process.env.IMAP_PASSWORD) || "",
   };
 
   if (db) {
@@ -81,7 +69,7 @@ async function getDynamicConfig() {
   }
 
   if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
-    throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured in Firestore or Environment Variables.");
+    throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured.");
   }
 
   return config;
@@ -95,90 +83,76 @@ async function startServer() {
   app.use(express.json());
   app.use(cookieParser());
   app.use(session({
-    store: new FirestoreStore({
-      dataset: firestore,
-      kind: 'sessions'
-    }),
     secret: process.env.SESSION_SECRET || 'super-secret-key',
     resave: false,
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       httpOnly: true,
-      maxAge: 1000 * 60 * 60 * 24 // 24 hours
+      maxAge: 1000 * 60 * 60 * 24
     }
   }));
-
-  // ... (API routes)
 
   // Helper to send Telegram notification
   async function sendTelegramNotification(message: string) {
     const CONFIG = await getDynamicConfig();
     const token = CONFIG.TELEGRAM_BOT_TOKEN;
-    const chatId = CONFIG.TELEGRAM_CHAT_ID; 
-    
+    const chatId = CONFIG.TELEGRAM_CHAT_ID;
+
     if (!token || !chatId) {
-      console.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing in CONFIG");
+      console.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing");
       throw new Error("Telegram config missing");
     }
 
-    try {
-      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error("Telegram API Error:", errorData);
-        throw new Error(`Telegram API Error: ${errorData}`);
-      }
-    } catch (err) {
-      console.error("Telegram Request Error:", err);
-      throw err;
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Telegram API Error:", errorData);
+      throw new Error(`Telegram API Error: ${errorData}`);
     }
   }
 
   // API Route to fetch emails
-  app.get("/api/emails", async (req, res) => {
-    const CONFIG = await getDynamicConfig();
-    const config = {
-      host: CONFIG.IMAP_HOST,
-      port: CONFIG.IMAP_PORT,
-      secure: true,
-      auth: {
-        user: CONFIG.IMAP_USER,
-        pass: CONFIG.IMAP_PASSWORD,
-      },
-      logger: false as false,
-    };
-
-    if (!config.auth.user || !config.auth.pass) {
-      return res.status(400).json({ error: "IMAP_USER or IMAP_PASSWORD is not set." });
-    }
-
-    const client = new ImapFlow(config);
-
+  app.get("/api/emails", async (_req, res) => {
     try {
+      const CONFIG = await getDynamicConfig();
+      const config = {
+        host: CONFIG.IMAP_HOST,
+        port: CONFIG.IMAP_PORT,
+        secure: true,
+        auth: { user: CONFIG.IMAP_USER, pass: CONFIG.IMAP_PASSWORD },
+        logger: false as false,
+      };
+
+      if (!config.auth.user || !config.auth.pass) {
+        return res.status(400).json({ success: false, error: "IMAP_USER or IMAP_PASSWORD is not set." });
+      }
+
+      const client = new ImapFlow(config);
       await client.connect();
       let lock = await client.getMailboxLock("INBOX");
-      const emails = [];
-      
+      const emails: any[] = [];
+
       try {
         const uids = await client.search({ from: "info@account.netflix.com" });
         const latestUids = Array.isArray(uids) ? uids.slice(-10) : [];
-        
+
         if (latestUids.length > 0) {
           for await (let message of client.fetch(latestUids, { source: true })) {
-            const parsed = await simpleParser(message.source);
+            if (!message.source) continue;
+            const parsed = await simpleParser(message.source as any);
             const subject = (parsed.subject || "").toLowerCase();
             const bodyText = parsed.text || "";
-            
+
             if (subject.includes("password reset") || subject.includes("reset your password") || bodyText.toLowerCase().includes("reset your password")) {
               continue;
             }
-            
+
             const otpMatch = bodyText.match(/\b\d{4,6}\b/);
             const otp = otpMatch ? otpMatch[0] : null;
 
@@ -186,9 +160,9 @@ async function startServer() {
               id: message.uid,
               subject: parsed.subject,
               from: parsed.from?.text,
-              to: parsed.to?.text,
+              to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text) : undefined,
               date: parsed.date,
-              otp: otp,
+              otp,
               preview: bodyText.substring(0, 100) + "...",
               html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
             });
@@ -201,114 +175,115 @@ async function startServer() {
       emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       res.json(emails);
     } catch (err) {
-      res.status(500).json({ error: "Failed to fetch emails." });
+      console.error("Email fetch error:", err);
+      res.status(500).json({ success: false, error: "Failed to fetch emails." });
     }
   });
 
-  // API Route for Login Notification & Location Capture
+  // Login Notification & Location
   app.post("/api/auth/notify", async (req, res) => {
-    const { username, status, name, lat, lon, city, state } = req.body;
-    
-    let locationData = "Unknown Location";
-    let mapsLink = "";
+    try {
+      const { username, status, name, lat, lon, city, state } = req.body;
+      let locationData = "Unknown Location";
+      let mapsLink = "";
 
-    if (lat && lon) {
-      locationData = `${city || "Unknown City"}, ${state || "Unknown State"}`;
-      mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
-    }
+      if (lat && lon) {
+        locationData = `${city || "Unknown City"}, ${state || "Unknown State"}`;
+        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
+      }
 
-    const message = `
+      const message = `
 <b>🔐 Login Attempt</b>
 <b>User:</b> ${name || username}
 <b>Status:</b> ${status === "success" ? "✅ Success" : "❌ Failed"}
 <b>Location:</b> ${locationData}${mapsLink}
 <b>Time:</b> ${new Date().toLocaleString()}
-    `;
+      `;
 
-    await sendTelegramNotification(message);
-    res.json({ success: true, location: locationData });
+      await sendTelegramNotification(message);
+      res.json({ success: true, location: locationData });
+    } catch (err) {
+      console.error("Notify error:", err);
+      res.status(500).json({ success: false, error: "Failed to send notification" });
+    }
   });
 
   // Admin Login
   app.post("/api/admin/login", async (req, res) => {
-    const { username, password } = req.body;
-    
     try {
+      const { username, password } = req.body;
+
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: "Username and password are required" });
+      }
+
       const q = query(collection(db, "users"), where("username", "==", username));
       const snapshot = await getDocs(q);
-      
+
       let userData: any;
-      
+
       if (snapshot.empty) {
-        // Bootstrap logic
         const CONFIG = await getDynamicConfig();
         if (username === CONFIG.ADMIN_EMAIL && password === CONFIG.ADMIN_PASSWORD) {
           const docRef = await addDoc(collection(db, "users"), {
-            username,
-            password,
-            name: "Administrator",
-            role: "admin"
+            username, password, name: "Administrator", role: "admin"
           });
           userData = { id: docRef.id, username, name: "Administrator", role: "admin" };
         } else {
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ success: false, error: "Invalid credentials" });
         }
       } else {
         const userDoc = snapshot.docs[0];
         userData = { id: userDoc.id, ...userDoc.data() };
-        
+
         if (userData.password !== password) {
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ success: false, error: "Invalid credentials" });
         }
-        
         if (userData.role !== "admin") {
-          return res.status(403).json({ error: "Access denied" });
+          return res.status(403).json({ success: false, error: "Access denied" });
         }
       }
-      
+
       req.session.user = userData;
       res.json({ success: true, user: userData });
     } catch (err) {
       console.error("Login error:", err);
-      res.status(500).json({ error: "Login failed" });
+      res.status(500).json({ success: false, error: "Login failed" });
     }
   });
 
-  // Check Auth Status
+  // Check Auth
   app.get("/api/auth/me", (req, res) => {
     if (req.session.user) {
-      res.json({ user: req.session.user });
+      res.json({ success: true, user: req.session.user });
     } else {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ success: false, error: "Not authenticated" });
     }
   });
 
-  // Admin 3FA: Generate Telegram OTP
+  // Request OTP
   app.post("/api/admin/request-otp", async (req, res) => {
-    if (!req.session.user) return res.status(401).json({ error: "Not authenticated" });
+    if (!req.session.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     try {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Store OTP in Firestore because Vercel Serverless memory is wiped between requests
+
       if (db) {
-        await setDoc(doc(db, "settings", "adminOtp"), { 
-          otp, 
-          expiresAt: Date.now() + 300000 // 5 minutes
+        await setDoc(doc(db, "settings", "adminOtp"), {
+          otp, expiresAt: Date.now() + 300000
         });
       } else {
-        // Fallback for local dev if DB is missing
         (global as any).tempAdminOtp = otp;
       }
-      
+
       await sendTelegramNotification(`<b>🛡 Admin 3FA OTP:</b> <code>${otp}</code>\nValid for 5 minutes.`);
       res.json({ success: true });
     } catch (err) {
       console.error("Error in request-otp:", err);
-      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to send OTP via Telegram" });
+      res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to send OTP" });
     }
   });
 
-
+  // Verify OTP
   app.post("/api/admin/verify-otp", async (req, res) => {
     try {
       const { otp } = req.body;
@@ -320,7 +295,6 @@ async function startServer() {
           const data = otpDoc.data();
           if (data.otp === otp && Date.now() < data.expiresAt) {
             isValid = true;
-            // Invalidate OTP after use
             await setDoc(doc(db, "settings", "adminOtp"), { otp: null, expiresAt: 0 });
           }
         }
@@ -334,54 +308,51 @@ async function startServer() {
       if (isValid) {
         res.json({ success: true });
       } else {
-        res.status(400).json({ error: "Invalid or expired OTP" });
+        res.status(400).json({ success: false, error: "Invalid or expired OTP" });
       }
     } catch (err) {
       console.error("Error verifying OTP:", err);
-      res.status(500).json({ error: "Failed to verify OTP" });
+      res.status(500).json({ success: false, error: "Failed to verify OTP" });
     }
   });
 
-  // Admin Reset/Initialize Notification
+  // Admin Reset
   app.post("/api/admin/reset", async (req, res) => {
-    const { username, password, type } = req.body;
-    
-    const message = `
+    try {
+      const { username, password, type } = req.body;
+      const message = `
 <b>🚨 Admin ${type === "initial" ? "Initialization" : "Reset"}</b>
 <b>Username:</b> <code>${username}</code>
 <b>Password:</b> <code>${password}</code>
 <b>Time:</b> ${new Date().toLocaleString()}
-
 <i>Please delete this message after saving credentials.</i>
-    `;
-
-    await sendTelegramNotification(message);
-    res.json({ success: true });
+      `;
+      await sendTelegramNotification(message);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Reset error:", err);
+      res.status(500).json({ success: false, error: "Failed to send reset notification" });
+    }
   });
 
-  // Server-side Admin Bootstrap
+  // Admin Bootstrap
   app.post("/api/admin/bootstrap", async (req, res) => {
-    const { username } = req.body;
-    const CONFIG = await getDynamicConfig();
-    const adminEmail = CONFIG.ADMIN_EMAIL;
-    
-    if (!adminEmail) {
-      return res.status(500).json({ error: "ADMIN_EMAIL is not configured on the server." });
-    }
-    
-    if (username !== adminEmail) {
-      return res.status(403).json({ error: "Not authorized to bootstrap" });
-    }
-
-    const initialPassword = CONFIG.ADMIN_PASSWORD;
-    
     try {
-      res.json({ 
-        username: adminEmail, 
-        password: initialPassword 
-      });
+      const { username } = req.body;
+      const CONFIG = await getDynamicConfig();
+      const adminEmail = CONFIG.ADMIN_EMAIL;
+
+      if (!adminEmail) {
+        return res.status(500).json({ success: false, error: "ADMIN_EMAIL is not configured." });
+      }
+      if (username !== adminEmail) {
+        return res.status(403).json({ success: false, error: "Not authorized to bootstrap" });
+      }
+
+      res.json({ success: true, username: adminEmail, password: CONFIG.ADMIN_PASSWORD });
     } catch (err) {
-      res.status(500).json({ error: "Bootstrap failed" });
+      console.error("Bootstrap error:", err);
+      res.status(500).json({ success: false, error: "Bootstrap failed" });
     }
   });
 
@@ -395,18 +366,17 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  // Only listen if not running in Vercel serverless environment
   if (!process.env.VERCEL) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
   }
-  
+
   return app;
 }
 
