@@ -561,7 +561,7 @@ function AdminAuthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ otp }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Invalid OTP");
       setStep(2);
       setError("");
