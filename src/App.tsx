@@ -1035,7 +1035,7 @@ function EmailViewer() {
       <main className="max-w-6xl mx-auto px-2 sm:px-4 h-[calc(100vh-3.5rem)] sm:h-[calc(100vh-4rem)] overflow-hidden">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8 h-full py-4 sm:py-8">
           <div className={`${selectedEmail ? "hidden lg:block" : "block"} lg:col-span-5 xl:col-span-4 flex flex-col overflow-hidden h-full`}>
-            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-5 flex items-center gap-3 sm:gap-4">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-5 flex items-center gap-3 sm:gap-4 flex-shrink-0">
               <div className="bg-green-100 p-2 sm:p-3 rounded-xl flex-shrink-0">
                 <ShieldCheck className="text-green-600 w-6 h-6" />
               </div>
