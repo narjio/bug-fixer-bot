@@ -45,6 +45,28 @@ function getRuntimeValue(value: string | undefined, fallback: string) {
   return value;
 }
 
+function getErrorMessage(error: unknown, fallback = "Something went wrong. Please try again.") {
+  if (typeof error === "string") return error;
+  if (error instanceof Error && error.message) return error.message;
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const preferred = record.error ?? record.message ?? record.details ?? record.reason;
+
+    if (typeof preferred === "string" && preferred.trim()) {
+      return preferred;
+    }
+
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return fallback;
+    }
+  }
+
+  return fallback;
+}
+
 async function sendTelegramOtp(otp: string, userId: string) {
   const otpServiceUrl = getRuntimeValue(import.meta.env.VITE_SUPABASE_URL, OTP_SERVICE_FALLBACK.url);
   const otpServiceKey = getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key);
@@ -1118,7 +1140,7 @@ function EmailViewer() {
       }
 
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to fetch emails.");
+        throw new Error(getErrorMessage(data?.error ?? data, "Failed to fetch emails."));
       }
 
       const emailList = (Array.isArray(data) ? data : []) as Email[];
@@ -1132,7 +1154,7 @@ function EmailViewer() {
         if (updated) setSelectedEmail(updated);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An unknown error occurred");
+      setError(getErrorMessage(err, "An unknown error occurred"));
     } finally {
       setLoading(false);
     }
