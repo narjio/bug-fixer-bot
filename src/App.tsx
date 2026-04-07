@@ -1007,26 +1007,25 @@ function EmailViewer() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
-        <div className="max-w-6xl mx-auto px-2 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-1 sm:gap-2">
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-shrink">
-            <div className="bg-red-600 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
-              <Mail className="text-white w-4 h-4 sm:w-5 sm:h-5" />
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="bg-red-600 p-2 rounded-xl flex-shrink-0">
+              <Mail className="text-white w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <h1 className="font-bold text-sm sm:text-xl tracking-tight hidden md:block">Secure OTP Viewer</h1>
-            <div className="flex items-center gap-1.5 bg-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full min-w-0">
-              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
-              <span className="text-[10px] sm:text-xs font-bold text-slate-600 truncate max-w-[60px] sm:max-w-[120px]">{user.name}</span>
+            <div className="min-w-0">
+              <h1 className="font-bold text-base sm:text-xl tracking-tight leading-tight">Mail</h1>
+              <span className="text-[10px] sm:text-xs text-slate-500 truncate block max-w-[80px] sm:max-w-[150px]">{user.name}</span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button onClick={() => fetchEmails()}
               disabled={syncing}
-              className="flex items-center gap-1.5 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
-              <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Refresh</span>
+              className="p-2.5 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
+              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${syncing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline ml-1.5">Refresh</span>
             </button>
-            <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
-              <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
+            <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+              <LogOut className="w-5 h-5 text-slate-400" />
             </button>
           </div>
         </div>
