@@ -1059,7 +1059,7 @@ function EmailViewer() {
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1 overflow-y-auto min-h-0">
                 {emails.length === 0 && !error ? (
                   <div className="bg-white border border-dashed border-slate-200 rounded-xl p-12 text-center">
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
