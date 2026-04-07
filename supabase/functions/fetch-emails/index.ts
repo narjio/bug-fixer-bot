@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // First try to get IMAP config from app_settings table (set by admin panel)
+    // Get IMAP config from app_settings first, then env vars
     let imapHost = "";
     let imapPort = 993;
     let imapUser = "";
@@ -44,10 +44,9 @@ Deno.serve(async (req) => {
         if (config.IMAP_PASSWORD) imapPassword = config.IMAP_PASSWORD;
       }
     } catch (e) {
-      console.log("Could not read app_settings, falling back to env vars:", e);
+      console.log("Could not read app_settings, falling back to env vars");
     }
 
-    // Fallback to environment secrets
     if (!imapHost) imapHost = Deno.env.get("IMAP_HOST") || "imap.gmail.com";
     if (!imapUser) imapUser = Deno.env.get("IMAP_USER") || "";
     if (!imapPassword) imapPassword = Deno.env.get("IMAP_PASSWORD") || "";
@@ -56,10 +55,7 @@ Deno.serve(async (req) => {
 
     if (!imapUser || !imapPassword) {
       return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Inbox is not configured yet. Add IMAP email and app password in Admin Panel.",
-        }),
+        JSON.stringify({ success: false, error: "Inbox is not configured yet. Add IMAP email and app password in Admin Panel." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -75,6 +71,10 @@ Deno.serve(async (req) => {
     });
 
     const emails: any[] = [];
+    let timedOut = false;
+
+    // 25 second safety timeout
+    const timeout = setTimeout(() => { timedOut = true; }, 25000);
 
     try {
       await client.connect();
@@ -82,20 +82,20 @@ Deno.serve(async (req) => {
       const lock = await client.getMailboxLock("INBOX");
 
       try {
-        // Fetch ALL emails - like the reference ZIP does
-        // Use source: true to get full email content for parsing
-        console.log("Fetching all emails from INBOX...");
-        
         const totalMessages = (client.mailbox as any)?.exists || 0;
-        console.log("Total messages in INBOX:", totalMessages);
+        console.log("Total messages:", totalMessages);
 
         if (totalMessages > 0) {
-          // Scan the last 20 messages for speed
-          const startSeq = Math.max(1, totalMessages - 19);
+          // Fetch last 15 messages - small enough to parse in time
+          const startSeq = Math.max(1, totalMessages - 14);
           const range = `${startSeq}:${totalMessages}`;
-          console.log("Scanning range:", range);
+          console.log("Fetching range:", range);
 
           for await (const message of client.fetch(range, { source: true })) {
+            if (timedOut) {
+              console.log("Timeout reached, returning what we have");
+              break;
+            }
             if (!message.source) continue;
 
             try {
@@ -103,13 +103,12 @@ Deno.serve(async (req) => {
                 skipImageLinks: true,
                 skipTextLinks: true,
               });
-              
+
               const subject = (parsed.subject || "").trim();
               const bodyText = (parsed.text || "").trim();
               const fromText = parsed.from?.text || "";
               const normalizedContent = `${subject}\n${fromText}\n${bodyText}`.toLowerCase();
 
-              // Skip password reset emails only
               const isPasswordReset = PASSWORD_RESET_KEYWORDS.some((kw) =>
                 normalizedContent.includes(kw)
               );
@@ -118,7 +117,6 @@ Deno.serve(async (req) => {
                 continue;
               }
 
-              // Extract OTP (4-8 digits)
               const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
               const otp = otpMatch ? otpMatch[0] : null;
 
@@ -127,19 +125,16 @@ Deno.serve(async (req) => {
                 subject: parsed.subject,
                 from: parsed.from?.text,
                 to: parsed.to
-                  ? Array.isArray(parsed.to)
-                    ? parsed.to[0]?.text
-                    : parsed.to.text
+                  ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
                   : undefined,
                 date: parsed.date,
                 otp,
-                preview: bodyText.length > 100
-                  ? `${bodyText.substring(0, 100)}...`
-                  : bodyText,
+                preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
                 html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
               });
+              console.log("Added email:", subject);
             } catch (parseErr) {
-              console.error("Failed to parse message:", parseErr);
+              console.error("Parse error:", parseErr);
             }
           }
         }
@@ -149,17 +144,14 @@ Deno.serve(async (req) => {
         lock.release();
       }
 
-      try {
-        await client.logout();
-      } catch {
-        // ignore logout errors
-      }
+      try { await client.logout(); } catch {}
     } catch (connErr) {
       if (emails.length === 0) throw connErr;
       console.error("IMAP error (returning partial):", connErr);
+    } finally {
+      clearTimeout(timeout);
     }
 
-    // Sort by date descending
     emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return new Response(JSON.stringify(emails), {
