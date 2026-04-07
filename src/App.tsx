@@ -1106,7 +1106,7 @@ function EmailViewer() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [otpCopied, setOtpCopied] = useState(false);
-  const refreshIntervalSeconds = 5;
+  const refreshIntervalSeconds = 15;
   const [countdown, setCountdown] = useState(refreshIntervalSeconds);
   const navigate = useNavigate();
 
