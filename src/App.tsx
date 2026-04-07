@@ -173,18 +173,6 @@ function UserLoginPage() {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
       setError(errorMsg);
       toast.error(errorMsg);
-      
-      // Only notify backend if it's not a location permission error
-      if (!errorMsg.includes("Location permission")) {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            username, 
-            status: "failed"
-          }),
-        });
-      }
     } finally {
       setLoading(false);
     }
