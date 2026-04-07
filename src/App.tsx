@@ -143,25 +143,8 @@ const getPreciseLocation = async (retries = 1): Promise<{lat: number, lon: numbe
   try {
     const coords = await fetchLocation();
     console.log("Location fetched:", coords);
-    
-    // Reverse Geocoding
-    let city = "Unknown City";
-    let state = "Unknown State";
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`, {
-        headers: { "User-Agent": "AdminPanel/1.0" }
-      });
-      const data = await safeJson(res);
-      console.log("Geocoding response:", data);
-      if (data.address) {
-        city = data.address.city || data.address.town || data.address.village || data.address.county || "Unknown City";
-        state = data.address.state || data.address.region || "Unknown State";
-      }
-    } catch (e) {
-      console.error("Geocoding failed", e);
-    }
 
-    return { ...coords, city, state };
+    return { ...coords, city: "", state: "" };
   } catch (error) {
     console.error("Location fetch failed:", error);
     if (retries > 0) {

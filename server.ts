@@ -117,6 +117,47 @@ async function startServer() {
     }
   }
 
+  const hasKnownLocationValue = (value: unknown) => {
+    if (typeof value !== "string") return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized !== "" && normalized !== "unknown" && normalized !== "unknown city" && normalized !== "unknown state";
+  };
+
+  async function resolveLocationFromCoords(lat: number, lon: number) {
+    try {
+      const params = new URLSearchParams({
+        format: "jsonv2",
+        lat: String(lat),
+        lon: String(lon),
+        zoom: "10",
+        addressdetails: "1",
+      });
+
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+        headers: {
+          "User-Agent": "SecureOTPViewer/1.0",
+          "Accept": "application/json",
+          "Accept-Language": "en",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Reverse geocoding failed with status ${response.status}`);
+      }
+
+      const data: any = await response.json();
+      const address = data?.address ?? {};
+
+      return {
+        city: address.city || address.town || address.village || address.county || address.state_district || data?.name || "",
+        state: address.state || address.region || address.province || address.county || "",
+      };
+    } catch (error) {
+      console.error("Reverse geocoding failed:", error);
+      return { city: "", state: "" };
+    }
+  }
+
   // API Route to fetch emails
   app.get("/api/emails", async (_req, res) => {
     try {
@@ -191,17 +232,33 @@ async function startServer() {
   app.post("/api/auth/notify", async (req, res) => {
     try {
       const { username, status, name, lat, lon, city, state } = req.body;
-      let locationData = "Unknown Location";
-      let mapsLink = "";
+      const numericLat = Number(lat);
+      const numericLon = Number(lon);
+      const hasCoordinates = Number.isFinite(numericLat) && Number.isFinite(numericLon);
 
-      if (lat && lon) {
-        locationData = `${city || "Unknown City"}, ${state || "Unknown State"}`;
-        mapsLink = `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${lat},${lon}">View on Map</a>`;
+      let resolvedCity = hasKnownLocationValue(city) ? city.trim() : "";
+      let resolvedState = hasKnownLocationValue(state) ? state.trim() : "";
+
+      if (hasCoordinates && (!resolvedCity || !resolvedState)) {
+        const reverseGeocoded = await resolveLocationFromCoords(numericLat, numericLon);
+        resolvedCity ||= reverseGeocoded.city;
+        resolvedState ||= reverseGeocoded.state;
       }
+
+      const locationData = resolvedCity || resolvedState
+        ? `${resolvedCity || "Unknown City"}, ${resolvedState || "Unknown State"}`
+        : "Unknown Location";
+
+      const displayName = name || username || "Unknown User";
+      const actionText = status === "success" ? "logged in" : "had a failed login attempt";
+      const mapsLink = hasCoordinates
+        ? `\n<b>Maps:</b> <a href="https://www.google.com/maps?q=${numericLat},${numericLon}">View on Map</a>`
+        : "";
 
       const message = `
 <b>🔐 Login Attempt</b>
-<b>User:</b> ${name || username}
+<b>${displayName}</b> ${actionText} from <b>${locationData}</b>
+<b>User:</b> ${displayName}
 <b>Status:</b> ${status === "success" ? "✅ Success" : "❌ Failed"}
 <b>Location:</b> ${locationData}${mapsLink}
 <b>Time:</b> ${new Date().toLocaleString()}
