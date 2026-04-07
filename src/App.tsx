@@ -1029,6 +1029,7 @@ function EmailViewer() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [showChangePassword, setShowChangePassword] = useState(!!user.mustChangePassword);
+  const [forcedPasswordChange] = useState(!!user.mustChangePassword);
 
   const [syncing, setSyncing] = useState(false);
   // syncIntervalRef removed — no more auto IMAP sync
