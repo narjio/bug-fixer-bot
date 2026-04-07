@@ -1421,6 +1421,9 @@ function EmailViewer() {
           font-family: 'Inter', sans-serif;
           line-height: 1.6;
           color: #334155;
+          font-size: 14px;
+          overflow-x: auto;
+          word-break: break-word;
         }
         .gmail-style-content img {
           max-width: 100%;
@@ -1429,10 +1432,26 @@ function EmailViewer() {
         .gmail-style-content a {
           color: #e11d48;
           text-decoration: underline;
+          word-break: break-all;
         }
         .gmail-style-content table {
           max-width: 100% !important;
           width: 100% !important;
+          table-layout: fixed !important;
+        }
+        .gmail-style-content td,
+        .gmail-style-content th {
+          word-break: break-word !important;
+          overflow-wrap: break-word !important;
+        }
+        @media (max-width: 480px) {
+          .gmail-style-content {
+            font-size: 12px;
+          }
+          .gmail-style-content table {
+            display: block !important;
+            overflow-x: auto !important;
+          }
         }
       `}</style>
     </div>
