@@ -17,6 +17,8 @@ Deno.serve(async (req) => {
     const imapUser = Deno.env.get("IMAP_USER") || "";
     const imapPassword = Deno.env.get("IMAP_PASSWORD") || "";
 
+    console.log("IMAP config:", { host: imapHost, port: imapPort, user: imapUser ? "SET" : "EMPTY", pass: imapPassword ? "SET" : "EMPTY" });
+
     if (!imapUser || !imapPassword) {
       return new Response(
         JSON.stringify({
@@ -27,6 +29,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log("Connecting to IMAP...");
     const client = new ImapFlow({
       host: imapHost,
       port: imapPort,
@@ -36,15 +39,21 @@ Deno.serve(async (req) => {
     });
 
     await client.connect();
+    console.log("IMAP connected successfully");
     const lock = await client.getMailboxLock("INBOX");
     const emails: any[] = [];
 
     try {
+      console.log("Searching mailbox...");
       const uids = await client.search({ all: true });
-      const latestUids = Array.isArray(uids) ? uids.slice(-25) : [];
+      console.log("Found", uids?.length ?? 0, "total messages");
+      const latestUids = Array.isArray(uids) ? uids.slice(-10) : [];
 
       if (latestUids.length > 0) {
+        let msgCount = 0;
         for await (const message of client.fetch(latestUids, { source: true })) {
+          msgCount++;
+          console.log("Processing message", msgCount, "uid:", message.uid);
           if (!message.source) continue;
           const parsed = await simpleParser(message.source);
           const subject = parsed.subject || "";
