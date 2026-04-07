@@ -44,14 +44,14 @@ Deno.serve(async (req) => {
 
       const isHashed = user.password.startsWith("$2");
       const passwordMatch = isHashed
-        ? await compare(password, user.password)
+        ? await bcrypt.compare(password, user.password)
         : password === user.password;
 
       if (!passwordMatch) throw new Error("Invalid username or password");
 
       // Upgrade plain text to hash
       if (!isHashed) {
-        const hashed = await hash(password);
+        const hashed = await bcrypt.hash(password);
         await supabase.from("app_users").update({ password: hashed }).eq("id", user.id);
       }
 
@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
       const { username, password, name, role } = params;
       if (!username || !password || !name) throw new Error("All fields required");
 
-      const hashed = await hash(password);
+      const hashed = await bcrypt.hash(password);
       const { data, error } = await supabase
         .from("app_users")
         .insert({ username, password: hashed, name, role: role || "user" })
