@@ -11,6 +11,12 @@ const OTP_SERVICE_FALLBACK = {
   key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ",
 };
 
+function getCloudflareWorkerUrl() {
+  const url = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+  if (url && url !== "undefined" && url !== "null") return url;
+  return ""; // empty = fallback to Supabase directly
+}
+
 function getRuntimeValue(value: string | undefined, fallback: string) {
   if (!value || value === "undefined" || value === "null") return fallback;
   return value;
