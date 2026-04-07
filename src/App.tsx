@@ -107,7 +107,7 @@ interface Email {
   id: string; subject: string; from: string; to?: string; date: string; otp: string | null; preview: string; html: string;
 }
 interface UserData {
-  id: string; username: string; name: string; role: "admin" | "user"; totpSecret?: string;
+  id: string; username: string; name: string; role: "admin" | "user"; totpSecret?: string; mustChangePassword?: boolean;
 }
 
 // --- Profile Colors ---
@@ -851,6 +851,75 @@ function AdminPanel() {
   );
 }
 
+// ==================== CHANGE PASSWORD MODAL ====================
+function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => void }) {
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (newPass.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (newPass !== confirmPass) { setError("Passwords do not match"); return; }
+    setLoading(true);
+    try {
+      await apiCall("manage-app", { action: "change_password", id: user.id, new_password: newPass });
+      // Update local storage to remove mustChangePassword flag
+      const stored = JSON.parse(localStorage.getItem("user") || "{}");
+      stored.mustChangePassword = false;
+      localStorage.setItem("user", JSON.stringify(stored));
+      toast.success("Password changed successfully!");
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
+        <div className="flex justify-center mb-4">
+          <div className="bg-red-600 p-3 rounded-2xl">
+            <Key className="text-white w-6 h-6" />
+          </div>
+        </div>
+        <h2 className="text-xl font-black text-center text-slate-900 mb-1">Change Your Password</h2>
+        <p className="text-slate-500 text-center text-xs mb-6">For your security, please set a new password that only you know.</p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="relative">
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              placeholder="New password (min 6 chars)" required autoFocus />
+          </div>
+          <div className="relative">
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              placeholder="Confirm new password" required />
+          </div>
+          {error && (
+            <div className="bg-red-50 text-red-600 text-xs p-3 rounded-xl flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+            </div>
+          )}
+          <button type="submit" disabled={loading}
+            className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50">
+            {loading ? "Saving..." : "Set New Password"}
+          </button>
+        </form>
+        <p className="text-[10px] text-slate-400 text-center mt-4">This ensures no one else knows your password.</p>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ==================== EMAIL VIEWER ====================
 function EmailViewer() {
   const [emails, setEmails] = useState<Email[]>([]);
@@ -864,6 +933,7 @@ function EmailViewer() {
   const isFetchingRef = React.useRef(false);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const [showChangePassword, setShowChangePassword] = useState(!!user.mustChangePassword);
 
   const [syncing, setSyncing] = useState(false);
   // syncIntervalRef removed — no more auto IMAP sync
@@ -1006,6 +1076,9 @@ function EmailViewer() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      {showChangePassword && (
+        <ChangePasswordModal user={user} onDone={() => setShowChangePassword(false)} />
+      )}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -1148,7 +1221,19 @@ function EmailViewer() {
                     </div>
                   )}
                   <div className="email-html-wrapper">
-                    <div className="gmail-style-content" dangerouslySetInnerHTML={{ __html: selectedEmail.html }} />
+                    <iframe
+                      srcDoc={`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:8px;font-family:sans-serif;font-size:14px;color:#334155;overflow-x:hidden;word-break:break-word}img{max-width:100%!important;height:auto!important}table{max-width:100%!important;width:100%!important}td,th{max-width:100%!important;overflow:hidden}a{color:#e11d48}*{box-sizing:border-box}</style></head><body>${selectedEmail.html}</body></html>`}
+                      sandbox="allow-same-origin"
+                      className="w-full border-0"
+                      style={{ minHeight: "400px" }}
+                      title="Email content"
+                      onLoad={(e) => {
+                        const iframe = e.target as HTMLIFrameElement;
+                        if (iframe.contentDocument?.body) {
+                          iframe.style.height = iframe.contentDocument.body.scrollHeight + 20 + "px";
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               </motion.div>
@@ -1171,78 +1256,9 @@ function EmailViewer() {
           max-width: 100%;
           width: 100%;
         }
-        .gmail-style-content {
-          font-family: 'Inter', sans-serif;
-          line-height: 1.6;
-          color: #334155;
-          font-size: 14px;
-          word-break: break-word;
-          overflow-wrap: break-word;
-          max-width: 100%;
-        }
-        .gmail-style-content * {
-          max-width: 100% !important;
-          box-sizing: border-box !important;
-        }
-        .gmail-style-content img {
-          max-width: 100% !important;
-          height: auto !important;
+        .email-html-wrapper iframe {
           display: block;
-        }
-        .gmail-style-content a {
-          color: #e11d48;
-          text-decoration: underline;
-          word-break: break-all;
-        }
-        .gmail-style-content table {
-          border-collapse: collapse;
-          width: 100% !important;
-          max-width: 100% !important;
-          table-layout: fixed !important;
-        }
-        .gmail-style-content td,
-        .gmail-style-content th {
-          word-break: break-word !important;
-          overflow-wrap: break-word !important;
-          max-width: 100% !important;
-          overflow: hidden !important;
-        }
-        .gmail-style-content div,
-        .gmail-style-content span,
-        .gmail-style-content p {
-          max-width: 100% !important;
-          overflow-wrap: break-word !important;
-        }
-        @media (max-width: 640px) {
-          .email-html-wrapper {
-            margin: 0;
-            padding: 0;
-          }
-          .gmail-style-content {
-            font-size: 13px;
-          }
-          .gmail-style-content table {
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-          .gmail-style-content td,
-          .gmail-style-content th {
-            padding: 4px 2px !important;
-            display: block !important;
-            width: 100% !important;
-            box-sizing: border-box !important;
-          }
-          .gmail-style-content td img,
-          .gmail-style-content th img {
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-          .gmail-style-content [style*="width"],
-          .gmail-style-content [style*="min-width"] {
-            width: 100% !important;
-            min-width: 0 !important;
-            max-width: 100% !important;
-          }
+          width: 100%;
         }
       `}</style>
     </div>
