@@ -1004,7 +1004,6 @@ function EmailViewer() {
               <RefreshCw className={`w-4 h-4 ${(loading || syncing) ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">{syncing ? "Syncing..." : "Refresh"}</span>
             </button>
-            </button>
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
               <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             </button>
