@@ -921,7 +921,8 @@ function AdminPanel() {
 }
 
 // ==================== CHANGE PASSWORD MODAL ====================
-function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => void }) {
+function ChangePasswordModal({ user, onDone, forced = false }: { user: UserData; onDone: () => void; forced?: boolean }) {
+  const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [loading, setLoading] = useState(false);
@@ -930,12 +931,17 @@ function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => v
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!forced && !currentPass) { setError("Enter your current password"); return; }
     if (newPass.length < 6) { setError("Password must be at least 6 characters"); return; }
     if (newPass !== confirmPass) { setError("Passwords do not match"); return; }
     setLoading(true);
     try {
-      await apiCall("manage-app", { action: "change_password", id: user.id, new_password: newPass });
-      // Update local storage to remove mustChangePassword flag
+      await apiCall("manage-app", {
+        action: "change_password",
+        id: user.id,
+        ...(forced ? {} : { current_password: currentPass }),
+        new_password: newPass,
+      });
       const stored = JSON.parse(localStorage.getItem("user") || "{}");
       stored.mustChangePassword = false;
       localStorage.setItem("user", JSON.stringify(stored));
@@ -953,24 +959,36 @@ function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => v
       <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
         <div className="flex justify-center mb-4">
-          <div className="bg-red-600 p-3 rounded-2xl">
+          <div className="bg-gradient-to-br from-violet-500 to-purple-600 p-3 rounded-2xl shadow-lg shadow-purple-200">
             <Key className="text-white w-6 h-6" />
           </div>
         </div>
-        <h2 className="text-xl font-black text-center text-slate-900 mb-1">Change Your Password</h2>
-        <p className="text-slate-500 text-center text-xs mb-6">For your security, please set a new password that only you know.</p>
+        <h2 className="text-xl font-black text-center text-slate-900 mb-1">
+          {forced ? "Set Your Password" : "Change Password"}
+        </h2>
+        <p className="text-slate-500 text-center text-xs mb-6">
+          {forced ? "For security, set a private password only you know." : "Update your password to keep your account secure."}
+        </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {!forced && (
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+              <input type="password" value={currentPass} onChange={(e) => setCurrentPass(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-purple-500 outline-none text-sm"
+                placeholder="Current password" required autoFocus />
+            </div>
+          )}
           <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
             <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
-              placeholder="New password (min 6 chars)" required autoFocus />
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-purple-500 outline-none text-sm"
+              placeholder="New password (min 6 chars)" required {...(forced ? { autoFocus: true } : {})} />
           </div>
           <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
             <input type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-purple-500 outline-none text-sm"
               placeholder="Confirm new password" required />
           </div>
           {error && (
@@ -978,12 +996,20 @@ function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => v
               <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
             </div>
           )}
-          <button type="submit" disabled={loading}
-            className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50">
-            {loading ? "Saving..." : "Set New Password"}
-          </button>
+          <div className={`flex gap-3 pt-1 ${forced ? "" : ""}`}>
+            {!forced && (
+              <button type="button" onClick={onDone}
+                className="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-200 transition-all active:scale-95">
+                Cancel
+              </button>
+            )}
+            <button type="submit" disabled={loading}
+              className={`${forced ? "w-full" : "flex-1"} bg-gradient-to-r from-violet-500 to-purple-600 text-white font-bold py-3 rounded-xl hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95 disabled:opacity-50 shadow-md shadow-purple-200`}>
+              {loading ? "Saving..." : forced ? "Set Password" : "Update Password"}
+            </button>
+          </div>
         </form>
-        <p className="text-[10px] text-slate-400 text-center mt-4">This ensures no one else knows your password.</p>
+        <p className="text-[10px] text-slate-400 text-center mt-4">🔒 Your password is encrypted and secure.</p>
       </motion.div>
     </motion.div>
   );
@@ -1003,6 +1029,7 @@ function EmailViewer() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [showChangePassword, setShowChangePassword] = useState(!!user.mustChangePassword);
+  const [forcedPasswordChange] = useState(!!user.mustChangePassword);
 
   const [syncing, setSyncing] = useState(false);
   // syncIntervalRef removed — no more auto IMAP sync
@@ -1146,7 +1173,7 @@ function EmailViewer() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       {showChangePassword && (
-        <ChangePasswordModal user={user} onDone={() => setShowChangePassword(false)} />
+        <ChangePasswordModal user={user} onDone={() => setShowChangePassword(false)} forced={forcedPasswordChange && showChangePassword} />
       )}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
@@ -1159,12 +1186,18 @@ function EmailViewer() {
               <span className="text-[10px] sm:text-xs text-slate-500 truncate block max-w-[80px] sm:max-w-[150px]">{user.name}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button onClick={() => fetchEmails()}
               disabled={syncing}
               className="flex items-center p-2.5 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline ml-1.5">Refresh</span>
+            </button>
+            <button onClick={() => setShowChangePassword(true)}
+              className="flex items-center p-2.5 sm:px-3 sm:py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-full text-sm font-bold hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95 shadow-md shadow-purple-200"
+              title="Change Password">
+              <Key className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="hidden sm:inline ml-1.5">Password</span>
             </button>
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
               <LogOut className="w-5 h-5 text-slate-400" />
