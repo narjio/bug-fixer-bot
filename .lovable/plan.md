@@ -1,54 +1,105 @@
 
-Goal: inbox ko actually emails dikhana hai, especially Netflix mails, but password reset emails ko hide hi rakhna hai.
 
-What I found
-- IMAP credentials likely the problem nahi hain: backend logs show mail server connect ho raha hai and messages process bhi ho rahe hain.
-- Real issue code flow me hai:
-  1. `server.ts` me abhi bhi old OTP-only filter pada hua hai, jo sirf OTP-like mails dikhata hai and Netflix jaise mails ko skip kar sakta hai.
-  2. `fetch-emails` full mailbox scan kar raha hai (`search({ all: true })`) even though mailbox me ~94k messages hain, then sirf last 20 leta hai.
-  3. Ek request ~21s le rahi hai, but UI har 15s me refresh kar raha hai, so overlapping requests start ho rahi hain.
-  4. Code sirf `INBOX` padhta hai; Gmail me kuch Netflix mails `All Mail`/other labels me ho sakti hain.
-- Isliye issue “email credentials” se zyada “filtering + slow retrieval + mismatched runtime paths” ka lag raha hai.
+## Problem Summary
 
-Plan
-1. Unify the email logic
-- Preview aur deployed site dono ko same email-fetching logic par laana.
-- `server.ts` ka old OTP filter hataana ya `/api/emails` ko same backend logic se align karna.
-- Final rule simple hoga: sab recent mails show karo except password reset mails.
+The edge function **is working** -- logs show it connects to IMAP, fetches 30 messages, and processes all 30 successfully. But the function **times out** before sending the response back to the client. Parsing 30 full email sources (with HTML, attachments, etc.) from a 94k+ mailbox takes too long for the edge function's execution limit.
 
-2. Speed up IMAP fetching
-- `search({ all: true })` remove karna.
-- Sirf newest mail range fetch karna (for example last 50–100 messages) instead of scanning all 94k.
-- Isse response fast aayega and realtime behavior better hoga.
+Additionally, the user wants:
+1. Remove Firebase completely -- use Lovable Cloud (database) for users, settings, OTPs
+2. Netflix-style profile login (show all user profiles as cards, click profile, enter password)
+3. Emails must actually show up
 
-3. Broaden mailbox coverage
-- `INBOX` primary rahega.
-- Gmail fallback add karna for folders/labels like `All Mail` if needed, taaki Netflix mails miss na hon.
+## Root Causes
 
-4. Keep password reset exclusion only
-- Password reset / forgot password / reset your password type mails hide rakhna.
-- OTP keyword requirement completely remove karna.
-- OTP detect sirf badge/copy button ke liye rakhna, filtering ke liye nahi.
+1. **Email timeout**: Fetching `source: true` for 30 messages and parsing each with `simpleParser` takes ~40+ seconds. Edge functions have a ~30s timeout. The logs confirm "Processed 30 messages, kept 30" but the response never reaches the client due to timeout.
+2. **Firebase dependency**: All auth, user management, OTP storage, and settings are stored in Firebase Firestore. The app cannot work without Firebase currently.
+3. **Login UX**: Current user login fetches all usernames from Firestore and shows a dropdown after a delay.
 
-5. Fix polling in the UI
-- Jab ek fetch chal raha ho tab second fetch start na ho.
-- Refresh interval ko request duration ke hisaab se safe banana.
-- Manual refresh button working rahega.
+## Plan
 
-6. Improve empty state
-- “No emails found” aur “fetch failed” ko alag dikhana.
-- Agar mails scan hue but matching mails na mile, to clearer message show hoga.
+### Step 1: Fix email fetching (make it actually return data)
+**File**: `supabase/functions/fetch-emails/index.ts`
 
-Validation
-- Recent non-password-reset emails list me dikhne chahiye.
-- `info@account.netflix.com` ka mail show hona chahiye if it exists in scanned folders.
-- Password reset mails hidden rehne chahiye.
-- Lovable preview aur `https://bug-fixer-bot.vercel.app/` dono par verify karna hoga, because frontend changes live site par tabhi aayenge jab Vercel rebuild/update hoga.
+- Reduce from 30 to **10 messages** to stay within timeout
+- Use `envelope` + `bodyStructure` fetch instead of `source: true` to get metadata faster
+- Only fetch full `source` for messages that pass initial filtering
+- Add a **connection timeout** of 25 seconds to ensure the function responds before edge timeout
+- Wrap the entire operation in a timeout safety net that returns whatever emails were collected so far
 
-Technical details
-- Main files: `supabase/functions/fetch-emails/index.ts`, `server.ts`, `src/App.tsx`
-- Important code problems to remove:
-  - full mailbox scan on ~94k emails
-  - only last 20 emails window
-  - overlapping 15s polling
-  - old strict filter still present in `server.ts`
+### Step 2: Create database tables for users, settings, OTPs
+**Migration**: Create tables in Lovable Cloud
+
+```text
+users table:
+- id (uuid, PK)
+- username (text, unique)
+- password (text, bcrypt hashed)
+- name (text)
+- role (text: 'admin' or 'user')
+- totp_secret (text, nullable)
+- created_at (timestamp)
+
+settings table:
+- key (text, PK)
+- value (jsonb)
+
+otps table:
+- user_id (uuid, FK to users)
+- otp (text)
+- created_at (timestamp)
+- expires_at (timestamp)
+```
+
+RLS: Public read on users (username, name, role only for profile display). Authenticated write for admin operations. OTPs restricted.
+
+### Step 3: Create edge functions for auth operations
+Since auth data moves to Lovable Cloud DB, we need edge functions:
+
+- **`manage-users`**: CRUD operations for users (create, list, delete, update password)
+- **`auth-login`**: Verify username + password, return user data
+- **`manage-settings`**: Get/set settings (IMAP config, Telegram config, ReCAPTCHA)
+- **`manage-otps`**: Create and verify OTPs
+
+### Step 4: Build Netflix-style profile login
+**File**: `src/App.tsx` (UserLoginPage)
+
+- Home screen shows all user profile cards (fetched from `manage-users` edge function)
+- Each card shows user's name with an avatar initial
+- Click a profile card -> password input screen appears
+- Enter password -> login
+- No dropdown delay, no username typing needed
+
+### Step 5: Remove all Firebase code
+**Files to modify**: `src/App.tsx`, remove `src/firebase.ts`
+**Files to remove from imports**: `firebase/firestore`, `firebase/app`, `firebase/auth`
+
+- Replace all `collection()`, `getDocs()`, `getDoc()`, `setDoc()`, `addDoc()`, `deleteDoc()` calls with Supabase edge function calls
+- Replace `db` references with fetch calls to edge functions
+- Remove `firebase`, `firebase-admin` from `package.json`
+- Remove `firebase-applet-config.json`, `firebase-blueprint.json`, `firestore.rules`
+- Keep `server.ts` for Vercel deployment but update it to not use Firebase
+
+### Step 6: Update server.ts for Vercel
+**File**: `server.ts`
+
+- Remove all Firebase imports and initialization
+- For Vercel deployment, `server.ts` API routes should proxy to the Supabase edge functions OR read directly from Lovable Cloud DB
+- Keep the same API routes (`/api/emails`, `/api/auth/notify`, etc.) but make them call edge functions internally
+
+## Technical Details
+
+- **Database**: 3 new tables (users, settings, otps) with RLS policies
+- **Edge functions**: 4 new + 1 updated (fetch-emails fix)
+- **Frontend**: Major refactor of `src/App.tsx` to remove Firebase, add Netflix-style profiles
+- **Packages to remove**: `firebase`, `firebase-admin`, `connect-firestore`
+- **Files to delete**: `src/firebase.ts`, `firebase-applet-config.json`, `firebase-blueprint.json`, `firestore.rules`
+
+## Order of Implementation
+
+1. Fix email edge function (immediate win -- emails will show)
+2. Create database tables
+3. Create auth/settings edge functions
+4. Refactor frontend to use edge functions + Netflix-style login
+5. Remove Firebase files and dependencies
+6. Update server.ts
+
