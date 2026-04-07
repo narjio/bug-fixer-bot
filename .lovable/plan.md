@@ -1,38 +1,54 @@
 
+Goal: inbox ko actually emails dikhana hai, especially Netflix mails, but password reset emails ko hide hi rakhna hai.
 
-## Problem Analysis
+What I found
+- IMAP credentials likely the problem nahi hain: backend logs show mail server connect ho raha hai and messages process bhi ho rahe hain.
+- Real issue code flow me hai:
+  1. `server.ts` me abhi bhi old OTP-only filter pada hua hai, jo sirf OTP-like mails dikhata hai and Netflix jaise mails ko skip kar sakta hai.
+  2. `fetch-emails` full mailbox scan kar raha hai (`search({ all: true })`) even though mailbox me ~94k messages hain, then sirf last 20 leta hai.
+  3. Ek request ~21s le rahi hai, but UI har 15s me refresh kar raha hai, so overlapping requests start ho rahi hain.
+  4. Code sirf `INBOX` padhta hai; Gmail me kuch Netflix mails `All Mail`/other labels me ho sakti hain.
+- Isliye issue “email credentials” se zyada “filtering + slow retrieval + mismatched runtime paths” ka lag raha hai.
 
-There are **two issues**:
+Plan
+1. Unify the email logic
+- Preview aur deployed site dono ko same email-fetching logic par laana.
+- `server.ts` ka old OTP filter hataana ya `/api/emails` ko same backend logic se align karna.
+- Final rule simple hoga: sab recent mails show karo except password reset mails.
 
-1. **Netflix emails not showing**: The edge function (`fetch-emails/index.ts`) has an overly strict OTP filter that skips emails unless they contain specific keywords like "otp", "verification code", "security code", etc. Netflix uses different wording (like "temporary access code", "sign-in code", or just sends the code without standard OTP keywords), so they get filtered out.
+2. Speed up IMAP fetching
+- `search({ all: true })` remove karna.
+- Sirf newest mail range fetch karna (for example last 50–100 messages) instead of scanning all 94k.
+- Isse response fast aayega and realtime behavior better hoga.
 
-2. **Password reset emails still need to be excluded**: You want password reset emails hidden, which the current code already does — but since the OTP filter is too aggressive, it blocks legitimate emails too.
+3. Broaden mailbox coverage
+- `INBOX` primary rahega.
+- Gmail fallback add karna for folders/labels like `All Mail` if needed, taaki Netflix mails miss na hon.
 
-3. **Wrong Vercel URL**: Your actual deployed site is `https://bug-fixer-bot.vercel.app/`, not `er-bot.vercel.app`. The Lovable preview uses the edge function directly (which works), but your Vercel deployment uses `server.ts` which is a separate codebase. The Vercel site needs to also call the edge function or have its own working IMAP setup.
+4. Keep password reset exclusion only
+- Password reset / forgot password / reset your password type mails hide rakhna.
+- OTP keyword requirement completely remove karna.
+- OTP detect sirf badge/copy button ke liye rakhna, filtering ke liye nahi.
 
-## Plan
+5. Fix polling in the UI
+- Jab ek fetch chal raha ho tab second fetch start na ho.
+- Refresh interval ko request duration ke hisaab se safe banana.
+- Manual refresh button working rahega.
 
-### Step 1: Fix the email filter in the edge function
-**File**: `supabase/functions/fetch-emails/index.ts`
+6. Improve empty state
+- “No emails found” aur “fetch failed” ko alag dikhana.
+- Agar mails scan hue but matching mails na mile, to clearer message show hoga.
 
-- **Remove the strict OTP-only filter** — show ALL emails except password reset ones
-- Keep the password reset exclusion (`password reset`, `reset your password`)
-- Add more password reset keywords to be thorough (`forgot password`, `change your password`, `password change`)
-- Still try to detect OTP codes from email content (for the OTP badge display), but don't use it as a filter to hide/show emails
-- Add Netflix-specific sender detection (`netflix.com`, `account.netflix.com`) to always include those emails
+Validation
+- Recent non-password-reset emails list me dikhne chahiye.
+- `info@account.netflix.com` ka mail show hona chahiye if it exists in scanned folders.
+- Password reset mails hidden rehne chahiye.
+- Lovable preview aur `https://bug-fixer-bot.vercel.app/` dono par verify karna hoga, because frontend changes live site par tabhi aayenge jab Vercel rebuild/update hoga.
 
-### Step 2: Update frontend to handle non-OTP emails gracefully
-**File**: `src/App.tsx`
-
-- Emails without a detected OTP should still display normally (just without the OTP code highlight)
-- No major changes needed since the Email type already has `otp` as optional
-
-### Step 3: Fix Vercel deployment concern
-**File**: `src/App.tsx`
-
-- The frontend already calls the Supabase edge function URL (not `/api/emails`), so your Vercel deployment at `bug-fixer-bot.vercel.app` should also work as long as the env vars `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set in your Vercel project settings
-- No code change needed, but you'll need to verify those env vars are configured in your Vercel dashboard
-
-## Summary
-The main fix is removing the aggressive OTP-keyword filter from the edge function so ALL emails show up (except password reset ones). Netflix emails and any other service emails will then appear in your inbox.
-
+Technical details
+- Main files: `supabase/functions/fetch-emails/index.ts`, `server.ts`, `src/App.tsx`
+- Important code problems to remove:
+  - full mailbox scan on ~94k emails
+  - only last 20 emails window
+  - overlapping 15s polling
+  - old strict filter still present in `server.ts`
