@@ -1014,11 +1014,10 @@ function EmailViewer() {
     setError(null);
     try {
       const response = await fetch("/api/emails");
+      const data = await safeJson(response);
       if (!response.ok) {
-        const data = await safeJson(response);
         throw new Error(data.error || "Failed to fetch emails");
       }
-      const data = await safeJson(response);
       setEmails(data);
       setLastUpdated(new Date());
       setCountdown(30);
