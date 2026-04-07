@@ -873,11 +873,16 @@ function EmailViewer() {
     setError(null);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25000);
-      console.log("[fetchEmails] Starting fetch...");
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      console.log("[fetchEmails] Starting fetch to", `${getApiBase()}/functions/v1/fetch-emails`);
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getApiKey()}` },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        },
+        body: JSON.stringify({}),
         signal: controller.signal,
       });
       clearTimeout(timeout);
@@ -907,7 +912,7 @@ function EmailViewer() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out (25s). Server may be slow. Try again.");
+        setError("Request timed out (30s). Server may be slow. Try again.");
       } else {
         setError(err instanceof Error ? err.message : "Unknown error");
       }
