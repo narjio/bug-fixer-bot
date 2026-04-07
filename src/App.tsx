@@ -1178,11 +1178,13 @@ function EmailViewer() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="bg-red-600 p-2 rounded-xl flex-shrink-0">
-              <Mail className="text-white w-5 h-5 sm:w-6 sm:h-6" />
+            <div className="bg-black p-1.5 sm:p-2 rounded-xl flex-shrink-0 shadow-lg shadow-red-900/20">
+              <svg viewBox="0 0 111 30" className="w-16 h-5 sm:w-20 sm:h-6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M105.062 14.28L111 30c-1.75-.25-3.499-.563-5.28-.845l-3.345-8.686-3.437 7.969c-1.687-.282-3.344-.625-5.031-.953l6.093-13.874L94.999 0H100.28l2.97 7.5L106.22 0h4.968l-6.126 14.28zM90.47 0h-4.594v27.25c1.5.094 3.062.156 4.594.343V0zM79.688 0H68.514v4.031h3.906V28.47c1.531.219 3.062.406 4.594.625V4.031h2.674V0zM64.514 1.094c-1.75-.375-3.5-.656-5.25-.875v25.063c1.75.22 3.5.469 5.25.75V1.094zM55.545 7.5c-.938-.156-1.876-.312-2.845-.437V30c.969 0 1.907-.031 2.845-.062V7.5zM49.845 6.688c-1.594-.188-3.157-.344-4.75-.437v24.468c1.594.063 3.157.156 4.75.281V6.688zM41.47 6.031c-1.594-.094-3.187-.156-4.781-.187V30.78c1.594.031 3.187.063 4.781.094V6.031zM33.064 5.906h-4.781V30.94h4.781V5.906zM24.533 6c-1.563.031-3.156.094-4.75.187v24.75c1.594-.094 3.187-.156 4.75-.218V6zM16.158 6.656c-1.593.125-3.156.281-4.75.468v23.813c1.594-.156 3.156-.281 4.75-.375V6.656zM7.783 7.875c-1.594.22-3.156.469-4.75.75V32.44c1.594-.281 3.156-.5 4.75-.688V7.875zM0 27.188V9.406c0-.906.75-1.5 1.594-1.312C3.156 8.344 4.718 8.094 6.281 7.875V30.625c-1.563.188-3.125.406-4.687.656C.75 31.5 0 30.875 0 30V27.188z" fill="#E50914"/>
+              </svg>
             </div>
             <div className="min-w-0">
-              <h1 className="font-bold text-base sm:text-xl tracking-tight leading-tight">Mail</h1>
+              <h1 className="font-bold text-base sm:text-xl tracking-tight leading-tight text-red-600">Netflix Mail</h1>
               <span className="text-[10px] sm:text-xs text-slate-500 truncate block max-w-[80px] sm:max-w-[150px]">{user.name}</span>
             </div>
           </div>
