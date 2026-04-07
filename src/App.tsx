@@ -954,16 +954,8 @@ function EmailViewer() {
       isFetchingRef.current = false;
     }
   };
-      if (err instanceof DOMException && err.name === "AbortError") {
-        console.log("[syncIMAP] Timeout - will retry next cycle");
-      } else {
-        console.error("[syncIMAP] Error:", err);
-      }
-    } finally {
-      setSyncing(false);
-      isFetchingRef.current = false;
-    }
-  };
+
+
 
   // Manual refresh: instant cache load + background IMAP sync
   const fetchEmails = async () => {
