@@ -341,11 +341,11 @@ function AdminLoginPage() {
       });
       
       if (!res.ok) {
-        const data = await res.json();
+        const data = await safeJson(res);
         throw new Error(data.error || "Invalid admin credentials");
       }
       
-      const { user: userData } = await res.json();
+      const { user: userData } = await safeJson(res);
       
       await fetch("/api/auth/notify", {
         method: "POST",
