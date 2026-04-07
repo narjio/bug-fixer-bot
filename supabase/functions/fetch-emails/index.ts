@@ -44,11 +44,16 @@ Deno.serve(async (req) => {
     const emails: any[] = [];
 
     try {
+      console.log("Searching mailbox...");
       const uids = await client.search({ all: true });
-      const latestUids = Array.isArray(uids) ? uids.slice(-25) : [];
+      console.log("Found", uids?.length ?? 0, "total messages");
+      const latestUids = Array.isArray(uids) ? uids.slice(-10) : [];
 
       if (latestUids.length > 0) {
+        let msgCount = 0;
         for await (const message of client.fetch(latestUids, { source: true })) {
+          msgCount++;
+          console.log("Processing message", msgCount, "uid:", message.uid);
           if (!message.source) continue;
           const parsed = await simpleParser(message.source);
           const subject = parsed.subject || "";
