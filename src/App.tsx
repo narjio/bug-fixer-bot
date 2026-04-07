@@ -133,6 +133,7 @@ function UserLoginPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const navigate = useNavigate();
+  const { checkAuth } = useAuth();
 
   useEffect(() => {
     const fetchUsernames = async () => {
@@ -168,6 +169,7 @@ function UserLoginPage() {
 
 
       localStorage.setItem("user", JSON.stringify(userData));
+      await checkAuth();
       navigate("/viewer");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
@@ -274,6 +276,7 @@ function AdminLoginPage() {
   const [siteKey, setSiteKey] = useState<string | null>(null);
   const [showCaptchaModal, setShowCaptchaModal] = useState(false);
   const navigate = useNavigate();
+  const { checkAuth } = useAuth();
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -318,6 +321,7 @@ function AdminLoginPage() {
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
       localStorage.setItem("user", JSON.stringify(userData));
+      await checkAuth(); // Update auth context so AdminAuthPage sees the user
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
