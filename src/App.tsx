@@ -851,6 +851,75 @@ function AdminPanel() {
   );
 }
 
+// ==================== CHANGE PASSWORD MODAL ====================
+function ChangePasswordModal({ user, onDone }: { user: UserData; onDone: () => void }) {
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (newPass.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (newPass !== confirmPass) { setError("Passwords do not match"); return; }
+    setLoading(true);
+    try {
+      await apiCall("manage-app", { action: "change_password", id: user.id, new_password: newPass });
+      // Update local storage to remove mustChangePassword flag
+      const stored = JSON.parse(localStorage.getItem("user") || "{}");
+      stored.mustChangePassword = false;
+      localStorage.setItem("user", JSON.stringify(stored));
+      toast.success("Password changed successfully!");
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
+        <div className="flex justify-center mb-4">
+          <div className="bg-red-600 p-3 rounded-2xl">
+            <Key className="text-white w-6 h-6" />
+          </div>
+        </div>
+        <h2 className="text-xl font-black text-center text-slate-900 mb-1">Change Your Password</h2>
+        <p className="text-slate-500 text-center text-xs mb-6">For your security, please set a new password that only you know.</p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="relative">
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              placeholder="New password (min 6 chars)" required autoFocus />
+          </div>
+          <div className="relative">
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 focus:ring-2 focus:ring-red-500 outline-none text-sm"
+              placeholder="Confirm new password" required />
+          </div>
+          {error && (
+            <div className="bg-red-50 text-red-600 text-xs p-3 rounded-xl flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+            </div>
+          )}
+          <button type="submit" disabled={loading}
+            className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50">
+            {loading ? "Saving..." : "Set New Password"}
+          </button>
+        </form>
+        <p className="text-[10px] text-slate-400 text-center mt-4">This ensures no one else knows your password.</p>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ==================== EMAIL VIEWER ====================
 function EmailViewer() {
   const [emails, setEmails] = useState<Email[]>([]);
@@ -864,6 +933,7 @@ function EmailViewer() {
   const isFetchingRef = React.useRef(false);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const [showChangePassword, setShowChangePassword] = useState(!!user.mustChangePassword);
 
   const [syncing, setSyncing] = useState(false);
   // syncIntervalRef removed — no more auto IMAP sync
