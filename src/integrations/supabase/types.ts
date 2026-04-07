@@ -91,6 +91,42 @@ export type Database = {
         }
         Relationships: []
       }
+      cached_emails: {
+        Row: {
+          cached_at: string
+          date: string | null
+          from_address: string | null
+          html: string | null
+          id: string
+          otp: string | null
+          preview: string | null
+          subject: string | null
+          to_address: string | null
+        }
+        Insert: {
+          cached_at?: string
+          date?: string | null
+          from_address?: string | null
+          html?: string | null
+          id: string
+          otp?: string | null
+          preview?: string | null
+          subject?: string | null
+          to_address?: string | null
+        }
+        Update: {
+          cached_at?: string
+          date?: string | null
+          from_address?: string | null
+          html?: string | null
+          id?: string
+          otp?: string | null
+          preview?: string | null
+          subject?: string | null
+          to_address?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

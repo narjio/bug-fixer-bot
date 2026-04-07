@@ -866,15 +866,12 @@ function EmailViewer() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-  const fetchEmails = async () => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-    setLoading(true);
-    setError(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Load cached emails from DB (instant)
+  const loadCachedEmails = async () => {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-      console.log("[fetchEmails] Starting fetch to", `${getApiBase()}/functions/v1/fetch-emails`);
+      console.log("[loadCached] Loading from cache...");
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
         headers: {
@@ -882,56 +879,97 @@ function EmailViewer() {
           "Authorization": `Bearer ${getApiKey()}`,
           "apikey": getApiKey(),
         },
-        body: JSON.stringify({}),
-        signal: controller.signal,
+        body: JSON.stringify({ mode: "cache" }),
       });
-      clearTimeout(timeout);
-      console.log("[fetchEmails] Response status:", res.status);
       const raw = await res.text();
-      console.log("[fetchEmails] Raw response length:", raw.length, "chars");
       let data: any = null;
-      if (raw) {
-        try { data = JSON.parse(raw); } catch {
-          console.error("[fetchEmails] JSON parse failed, raw:", raw.substring(0, 200));
-          throw new Error(res.status === 400
-            ? "Inbox not configured. Ask admin to add IMAP settings."
-            : "Email service temporarily unavailable.");
-        }
-      }
-      if (!res.ok) throw new Error(data?.error || "Failed to fetch emails.");
-
+      if (raw) { try { data = JSON.parse(raw); } catch {} }
       const emailList = (Array.isArray(data) ? data : []) as Email[];
-      console.log("[fetchEmails] Parsed", emailList.length, "emails");
+      console.log("[loadCached] Got", emailList.length, "cached emails");
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
-      setCountdown(refreshIntervalSeconds);
-      if (selectedEmail) {
-        const updated = emailList.find(e => e.id === selectedEmail.id);
-        if (updated) setSelectedEmail(updated);
+      return emailList.length;
+    } catch (err) {
+      console.error("[loadCached] Error:", err);
+      return 0;
+    }
+  };
+
+  // Sync from IMAP server (background, updates cache)
+  const syncFromImap = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setSyncing(true);
+    try {
+      console.log("[syncIMAP] Starting IMAP sync...");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        },
+        body: JSON.stringify({ mode: "sync" }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const raw = await res.text();
+      let data: any = null;
+      if (raw) { try { data = JSON.parse(raw); } catch {} }
+      if (!res.ok) {
+        const errMsg = data?.error || "Failed to sync emails.";
+        console.error("[syncIMAP] Error:", errMsg);
+        setError(errMsg);
+        return;
       }
+      const emailList = (Array.isArray(data) ? data : []) as Email[];
+      console.log("[syncIMAP] Synced", emailList.length, "emails from IMAP");
+      // Reload from cache to get all emails (including previously cached ones)
+      await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out (30s). Server may be slow. Try again.");
+        console.error("[syncIMAP] Timeout - will retry on next refresh");
       } else {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        console.error("[syncIMAP] Error:", err);
       }
-      console.error("[fetchEmails] Error:", err);
     } finally {
-      setLoading(false);
+      setSyncing(false);
       isFetchingRef.current = false;
     }
   };
 
+  // Manual refresh: instant cache load + background IMAP sync
+  const fetchEmails = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await loadCachedEmails();
+      // Trigger IMAP sync in background
+      syncFromImap();
+    } finally {
+      setLoading(false);
+      setCountdown(refreshIntervalSeconds);
+    }
+  };
+
   useEffect(() => {
-    fetchEmails();
+    // On mount: load cache instantly, then sync from IMAP
+    setLoading(true);
+    loadCachedEmails().then((count) => {
+      setLoading(false);
+      // Always sync on first load
+      syncFromImap();
+    });
     const interval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) { fetchEmails(); return refreshIntervalSeconds; }
+        if (prev <= 1) { syncFromImap().then(() => loadCachedEmails()); return refreshIntervalSeconds; }
         return prev - 1;
       });
     }, 1000);
-    const handleVisibility = () => { if (document.visibilityState === "visible") fetchEmails(); };
+    const handleVisibility = () => { if (document.visibilityState === "visible") { loadCachedEmails(); syncFromImap(); } };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => { clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
   }, []);
@@ -961,10 +999,10 @@ function EmailViewer() {
               <span className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase leading-tight">Refresh</span>
               <span className="text-xs sm:text-sm font-mono font-bold text-red-600">{countdown}s</span>
             </div>
-            <button onClick={() => fetchEmails()} disabled={loading}
+            <button onClick={() => fetchEmails()} disabled={loading || syncing}
               className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all disabled:opacity-50 active:scale-95">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Refresh</span>
+              <RefreshCw className={`w-4 h-4 ${(loading || syncing) ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">{syncing ? "Syncing..." : "Refresh"}</span>
             </button>
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
               <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
@@ -1004,20 +1042,15 @@ function EmailViewer() {
                 {emails.length === 0 && !error ? (
                   <div className="bg-white border border-dashed border-slate-200 rounded-xl p-12 text-center">
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                      {loading ? (
+                      {syncing ? (
                         <RefreshCw className="text-red-400 w-6 h-6 animate-spin" />
                       ) : (
-                        <Clock className="text-slate-200 w-6 h-6" />
+                        <Mail className="text-slate-200 w-6 h-6" />
                       )}
                     </div>
                     <p className="text-[10px] sm:text-xs text-slate-400 font-medium">
-                      {loading ? "Fetching emails from server... (this may take 15-20 seconds)" : "Waiting for emails..."}
+                      {syncing ? "Syncing emails from server..." : "No Netflix emails found"}
                     </p>
-                    {loading && (
-                      <div className="mt-3 w-32 h-1 bg-slate-100 rounded-full mx-auto overflow-hidden">
-                        <div className="h-full bg-red-500 rounded-full animate-pulse" style={{width: '60%'}} />
-                      </div>
-                    )}
                   </div>
                 ) : (
                   emails.map(email => (
