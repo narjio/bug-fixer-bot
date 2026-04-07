@@ -1117,16 +1117,10 @@ function EmailViewer() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `${getRuntimeValue(import.meta.env.VITE_SUPABASE_URL, OTP_SERVICE_FALLBACK.url)}/functions/v1/fetch-emails`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key)}`,
-          },
-        }
-      );
+      const response = await fetch("/api/emails", {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
       const raw = await response.text();
       let data: any = null;
 
