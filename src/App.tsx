@@ -6,6 +6,20 @@ import { db, auth } from "./firebase";
 import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { generateSecret, generateURI, verify } from "otplib";
 import { QRCodeSVG } from "qrcode.react";
+import bcrypt from "bcryptjs";
+
+// --- Rate Limiter (5 attempts per 60 seconds) ---
+const loginAttempts: { [key: string]: number[] } = {};
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const window = 60_000; // 1 minute
+  const maxAttempts = 5;
+  if (!loginAttempts[key]) loginAttempts[key] = [];
+  loginAttempts[key] = loginAttempts[key].filter(t => now - t < window);
+  if (loginAttempts[key].length >= maxAttempts) return false;
+  loginAttempts[key].push(now);
+  return true;
+}
 
 // Safe JSON parser - prevents crashes on non-JSON responses
 async function safeJson(res: Response): Promise<any> {
@@ -155,10 +169,15 @@ function UserLoginPage() {
     setError("");
 
     try {
+      if (!checkRateLimit(`user_${username}`)) {
+        throw new Error("Too many login attempts. Please wait 1 minute.");
+      }
+
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "user"));
+      // Fetch user by username only, then compare hashed password
+      const q = query(collection(db, "users"), where("username", "==", username), where("role", "==", "user"));
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
@@ -166,7 +185,23 @@ function UserLoginPage() {
       }
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      const storedPassword = snapshot.docs[0].data().password;
 
+      // Support both hashed and plain text passwords (for migration)
+      const isHashed = storedPassword && storedPassword.startsWith("$2");
+      const passwordMatch = isHashed
+        ? await bcrypt.compare(password, storedPassword)
+        : password === storedPassword;
+
+      if (!passwordMatch) {
+        throw new Error("Invalid username or password");
+      }
+
+      // If password was plain text, upgrade to hash
+      if (!isHashed) {
+        const hash = await bcrypt.hash(password, 10);
+        await setDoc(doc(db, "users", userData.id), { password: hash }, { merge: true });
+      }
 
       localStorage.setItem("user", JSON.stringify(userData));
       await checkAuth();
@@ -308,20 +343,40 @@ function AdminLoginPage() {
     setError("");
 
     try {
+      if (!checkRateLimit(`admin_${username}`)) {
+        throw new Error("Too many login attempts. Please wait 1 minute.");
+      }
+
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      // Query Firestore directly for admin user
-      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "admin"));
+      // Fetch admin by username only, then compare hashed password
+      const q = query(collection(db, "users"), where("username", "==", username), where("role", "==", "admin"));
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
         throw new Error("Invalid admin credentials");
       }
 
+      const storedPassword = snapshot.docs[0].data().password;
+      const isHashed = storedPassword && storedPassword.startsWith("$2");
+      const passwordMatch = isHashed
+        ? await bcrypt.compare(password, storedPassword)
+        : password === storedPassword;
+
+      if (!passwordMatch) {
+        throw new Error("Invalid admin credentials");
+      }
+
+      // Upgrade plain text to hash
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      if (!isHashed) {
+        const hash = await bcrypt.hash(password, 10);
+        await setDoc(doc(db, "users", userData.id), { password: hash }, { merge: true });
+      }
+
       localStorage.setItem("user", JSON.stringify(userData));
-      await checkAuth(); // Update auth context so AdminAuthPage sees the user
+      await checkAuth();
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
