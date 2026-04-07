@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
       }
 
       const hashed = await hashPassword(new_password);
-      const { error } = await supabase.from("app_users").update({ password: hashed }).eq("id", id);
+      const { error } = await supabase.from("app_users").update({ password: hashed, must_change_password: false }).eq("id", id);
       if (error) throw error;
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
