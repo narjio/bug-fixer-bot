@@ -133,6 +133,7 @@ function UserLoginPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const navigate = useNavigate();
+  const { checkAuth } = useAuth();
 
   useEffect(() => {
     const fetchUsernames = async () => {
