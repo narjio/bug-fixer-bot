@@ -530,30 +530,24 @@ function AdminAuthPage() {
           const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
           await setDoc(doc(db, "otps", user.id), { otp: otpCode, createdAt: serverTimestamp() });
 
-          // Read Telegram config from Firestore
-          const settingsDoc = await getDoc(doc(db, "settings", "server"));
-          const botToken = settingsDoc.exists() ? settingsDoc.data()?.TELEGRAM_BOT_TOKEN : null;
-          const chatId = settingsDoc.exists() ? settingsDoc.data()?.TELEGRAM_CHAT_ID : null;
+          // Send OTP via secure edge function (bot token never exposed to frontend)
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+          const telegramRes = await fetch(`${supabaseUrl}/functions/v1/send-telegram-otp`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseKey}`
+            },
+            body: JSON.stringify({ otp: otpCode, userId: user.id })
+          });
 
-          if (botToken && chatId) {
-            // Send OTP via Telegram
-            const telegramRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: `🛡 Admin 3FA OTP: <code>${otpCode}</code>\nValid for 5 minutes.`,
-                parse_mode: "HTML"
-              })
-            });
-            if (!telegramRes.ok) {
-              console.error("Telegram send failed:", await telegramRes.text());
-              toast.error("OTP generated but Telegram delivery failed. Check bot settings.");
-            } else {
-              toast.success("Secure OTP sent to your Telegram.");
-            }
+          if (!telegramRes.ok) {
+            const errData = await telegramRes.json().catch(() => ({}));
+            console.error("Telegram OTP failed:", errData);
+            toast.error("OTP generated but Telegram delivery failed.");
           } else {
-            toast.error("Telegram bot not configured. Please set bot token and chat ID in settings.");
+            toast.success("Secure OTP sent to your Telegram.");
           }
           setLoading(false);
         } catch (err) {
