@@ -600,11 +600,15 @@ function AdminPanel() {
   const [newName, setNewName] = useState("");
   const [siteKey, setSiteKey] = useState("");
   const [secretKeyVal, setSecretKeyVal] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
   const [serverConfig, setServerConfig] = useState({
     TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "", IMAP_HOST: "", IMAP_PORT: "", IMAP_USER: "", IMAP_PASSWORD: "",
   });
   const [savingConfig, setSavingConfig] = useState(false);
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
 
   useEffect(() => {
     (async () => {
@@ -641,6 +645,26 @@ function AdminPanel() {
       setSavingConfig(false);
     }
   };
+
+  const changeAdminPassword = async () => {
+    if (!currentPassword || !newAdminPassword) { toast.error("Fill both fields"); return; }
+    setChangingPassword(true);
+    try {
+      await apiCall("manage-app", {
+        action: "change_password",
+        id: currentUser?.id,
+        current_password: currentPassword,
+        new_password: newAdminPassword,
+      });
+      setCurrentPassword(""); setNewAdminPassword("");
+      toast.success("Password changed successfully!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
 
   const createUser = async () => {
     if (!newUsername || !newPassword || !newName) { toast.error("Please fill all fields"); return; }
@@ -704,7 +728,24 @@ function AdminPanel() {
             </div>
           </section>
 
-          {/* Create User */}
+          {/* Change Admin Password */}
+          <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
+            <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
+              <Key className="w-5 h-5 text-red-600" />Change Password
+            </h2>
+            <div className="space-y-3">
+              <input type="password" placeholder="Current Password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+                className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+              <input type="password" placeholder="New Password" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)}
+                className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+              <button onClick={changeAdminPassword} disabled={changingPassword}
+                className="w-full bg-red-600 text-white font-bold py-3 rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50">
+                {changingPassword ? "Changing..." : "Change Password"}
+              </button>
+            </div>
+          </section>
+
+
           <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
             <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-red-600" />Create User
