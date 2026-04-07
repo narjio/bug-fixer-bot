@@ -400,25 +400,6 @@ async function startServer() {
     });
   }
 
-  // Ensure settings/config document exists
-  if (db) {
-    const configDoc = doc(db, "settings", "config");
-    const docSnap = await getDoc(configDoc);
-    if (!docSnap.exists()) {
-      console.log("Initializing default settings/config document...");
-      await setDoc(configDoc, {
-        TELEGRAM_BOT_TOKEN: "PLACEHOLDER_TOKEN",
-        TELEGRAM_CHAT_ID: "PLACEHOLDER_CHAT_ID",
-        ADMIN_EMAIL: "admin@example.com",
-        ADMIN_PASSWORD: "admin123",
-        IMAP_HOST: "imap.gmail.com",
-        IMAP_PORT: 993,
-        IMAP_USER: "",
-        IMAP_PASSWORD: ""
-      });
-    }
-  }
-
   // Only listen if not running in Vercel serverless environment
   if (!process.env.VERCEL) {
     app.listen(PORT, "0.0.0.0", () => {
