@@ -7,6 +7,17 @@ import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc
 import { generateSecret, generateURI, verify } from "otplib";
 import { QRCodeSVG } from "qrcode.react";
 
+// Safe JSON parser - prevents crashes on non-JSON responses
+async function safeJson(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error("Invalid JSON response:", text);
+    throw new Error("Something went wrong. Please try again.");
+  }
+}
+
 // Auth Context
 const AuthContext = createContext<{ user: any, loading: boolean, checkAuth: () => Promise<void> } | null>(null);
 
@@ -18,7 +29,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const res = await fetch("/api/auth/me");
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeJson(res);
         setUser(data.user);
       } else {
         setUser(null);
@@ -93,7 +104,7 @@ const getPreciseLocation = async (retries = 1): Promise<{lat: number, lon: numbe
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`, {
         headers: { "User-Agent": "AdminPanel/1.0" }
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       console.log("Geocoding response:", data);
       if (data.address) {
         city = data.address.city || data.address.town || data.address.village || data.address.county || "Unknown City";
@@ -329,12 +340,12 @@ function AdminLoginPage() {
         body: JSON.stringify({ username, password })
       });
       
+      const data = await safeJson(res);
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Invalid admin credentials");
       }
       
-      const { user: userData } = await res.json();
+      const userData = data.user;
       
       await fetch("/api/auth/notify", {
         method: "POST",
@@ -510,7 +521,7 @@ function AdminAuthPage() {
       setLoading(true);
       fetch("/api/admin/request-otp", { method: "POST" })
         .then(async res => {
-          const data = await res.json();
+          const data = await safeJson(res);
           setLoading(false);
           if (!res.ok) {
             setError(data.error || "Failed to request OTP");
@@ -550,7 +561,7 @@ function AdminAuthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ otp }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Invalid OTP");
       setStep(2);
       setError("");
@@ -1003,11 +1014,10 @@ function EmailViewer() {
     setError(null);
     try {
       const response = await fetch("/api/emails");
+      const data = await safeJson(response);
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || "Failed to fetch emails");
       }
-      const data = await response.json();
       setEmails(data);
       setLastUpdated(new Date());
       setCountdown(30);
