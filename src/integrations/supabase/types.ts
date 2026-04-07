@@ -65,6 +65,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          must_change_password: boolean
           name: string
           password: string
           role: string
@@ -74,6 +75,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          must_change_password?: boolean
           name: string
           password: string
           role?: string
@@ -83,6 +85,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          must_change_password?: boolean
           name?: string
           password?: string
           role?: string
