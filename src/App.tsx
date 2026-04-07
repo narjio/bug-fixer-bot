@@ -666,6 +666,7 @@ function AdminPanel() {
   };
 
 
+  const createUser = async () => {
     if (!newUsername || !newPassword || !newName) { toast.error("Please fill all fields"); return; }
     try {
       await apiCall("manage-app", { action: "create", username: newUsername, password: newPassword, name: newName, role: "user" });
