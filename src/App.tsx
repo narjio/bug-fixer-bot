@@ -910,30 +910,50 @@ function EmailViewer() {
     isFetchingRef.current = true;
     setSyncing(true);
     try {
+      const cfUrl = getCloudflareWorkerUrl();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 50000);
-      const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${getApiKey()}`,
-          "apikey": getApiKey(),
-        },
-        body: JSON.stringify({ mode: "sync" }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const raw = await res.text();
-      let data: any = null;
-      if (raw) { try { data = JSON.parse(raw); } catch {} }
-      if (!res.ok) {
-        const errMsg = data?.error || "Failed to sync emails.";
-        setError(errMsg);
-        return;
+      
+      if (cfUrl) {
+        // Use Cloudflare Worker to trigger sync
+        await fetch(`${cfUrl}/api/emails/sync`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+      } else {
+        // Fallback to Supabase directly
+        const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getApiKey()}`,
+            "apikey": getApiKey(),
+          },
+          body: JSON.stringify({ mode: "sync" }),
+          signal: controller.signal,
+        });
+        const raw = await res.text();
+        let data: any = null;
+        if (raw) { try { data = JSON.parse(raw); } catch {} }
+        if (!res.ok) {
+          const errMsg = data?.error || "Failed to sync emails.";
+          setError(errMsg);
+        }
       }
-      // After IMAP sync, reload from cache to get full list
+      clearTimeout(timeout);
+      // After sync, reload from cache
       await loadCachedEmails();
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        console.log("[syncIMAP] Timeout - will retry next cycle");
+      } else {
+        console.error("[syncIMAP] Error:", err);
+      }
+    } finally {
+      setSyncing(false);
+      isFetchingRef.current = false;
+    }
+  };
       if (err instanceof DOMException && err.name === "AbortError") {
         console.log("[syncIMAP] Timeout - will retry next cycle");
       } else {
