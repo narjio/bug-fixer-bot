@@ -27,15 +27,17 @@ try {
 // --- DYNAMIC CONFIGURATION ---
 // Helper to get the latest config, merging Environment Variables with Firestore Database
 async function getDynamicConfig() {
+  const cleanEnv = (val: string | undefined) => (val && val !== "undefined" && val.trim() !== "") ? val.trim() : null;
+
   let config = {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "8575582532:AAE38rkI_zHmvmI8mZXdbYDp9ap3iT6mUGE", 
-    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || "769748540", 
-    ADMIN_EMAIL: process.env.ADMIN_EMAIL || "omdevsinhgohil538@gmail.com", 
-    ADMIN_PASSWORD: process.env.ADMIN_INITIAL_PASSWORD || "admin123", 
-    IMAP_HOST: process.env.IMAP_HOST || "imap.gmail.com",
-    IMAP_PORT: parseInt(process.env.IMAP_PORT || "993"),
-    IMAP_USER: process.env.IMAP_USER || "omdevsinhgohil538@gmail.com", 
-    IMAP_PASSWORD: process.env.IMAP_PASSWORD || "", 
+    TELEGRAM_BOT_TOKEN: cleanEnv(process.env.TELEGRAM_BOT_TOKEN) || "8575582532:AAE38rkI_zHmvmI8mZXdbYDp9ap3iT6mUGE", 
+    TELEGRAM_CHAT_ID: cleanEnv(process.env.TELEGRAM_CHAT_ID) || "769748540", 
+    ADMIN_EMAIL: cleanEnv(process.env.ADMIN_EMAIL) || "omdevsinhgohil538@gmail.com", 
+    ADMIN_PASSWORD: cleanEnv(process.env.ADMIN_INITIAL_PASSWORD) || "admin123", 
+    IMAP_HOST: cleanEnv(process.env.IMAP_HOST) || "imap.gmail.com",
+    IMAP_PORT: parseInt(cleanEnv(process.env.IMAP_PORT) || "993"),
+    IMAP_USER: cleanEnv(process.env.IMAP_USER) || "omdevsinhgohil538@gmail.com", 
+    IMAP_PASSWORD: cleanEnv(process.env.IMAP_PASSWORD) || "", 
   };
 
   if (db) {
@@ -44,14 +46,14 @@ async function getDynamicConfig() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         // Only override if the database value is actually set (not empty)
-        if (data.TELEGRAM_BOT_TOKEN) config.TELEGRAM_BOT_TOKEN = data.TELEGRAM_BOT_TOKEN;
-        if (data.TELEGRAM_CHAT_ID) config.TELEGRAM_CHAT_ID = data.TELEGRAM_CHAT_ID;
-        if (data.ADMIN_EMAIL) config.ADMIN_EMAIL = data.ADMIN_EMAIL;
-        if (data.ADMIN_PASSWORD) config.ADMIN_PASSWORD = data.ADMIN_PASSWORD;
-        if (data.IMAP_HOST) config.IMAP_HOST = data.IMAP_HOST;
-        if (data.IMAP_PORT) config.IMAP_PORT = parseInt(data.IMAP_PORT);
-        if (data.IMAP_USER) config.IMAP_USER = data.IMAP_USER;
-        if (data.IMAP_PASSWORD) config.IMAP_PASSWORD = data.IMAP_PASSWORD;
+        if (data.TELEGRAM_BOT_TOKEN?.trim()) config.TELEGRAM_BOT_TOKEN = data.TELEGRAM_BOT_TOKEN.trim();
+        if (data.TELEGRAM_CHAT_ID?.trim()) config.TELEGRAM_CHAT_ID = data.TELEGRAM_CHAT_ID.trim();
+        if (data.ADMIN_EMAIL?.trim()) config.ADMIN_EMAIL = data.ADMIN_EMAIL.trim();
+        if (data.ADMIN_PASSWORD?.trim()) config.ADMIN_PASSWORD = data.ADMIN_PASSWORD.trim();
+        if (data.IMAP_HOST?.trim()) config.IMAP_HOST = data.IMAP_HOST.trim();
+        if (data.IMAP_PORT?.toString().trim()) config.IMAP_PORT = parseInt(data.IMAP_PORT);
+        if (data.IMAP_USER?.trim()) config.IMAP_USER = data.IMAP_USER.trim();
+        if (data.IMAP_PASSWORD?.trim()) config.IMAP_PASSWORD = data.IMAP_PASSWORD.trim();
       }
     } catch (err) {
       console.error("Error fetching config from Firestore:", err);
@@ -75,7 +77,7 @@ async function startServer() {
     
     if (!token || !chatId) {
       console.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing in CONFIG");
-      return;
+      throw new Error("Telegram config missing");
     }
 
     try {
@@ -88,9 +90,11 @@ async function startServer() {
       if (!response.ok) {
         const errorData = await response.text();
         console.error("Telegram API Error:", errorData);
+        throw new Error(`Telegram API Error: ${errorData}`);
       }
     } catch (err) {
       console.error("Telegram Request Error:", err);
+      throw err;
     }
   }
 
@@ -203,25 +207,59 @@ async function startServer() {
   });
 
   // Admin 3FA: Generate Telegram OTP
-  const tempOtps = new Map<string, string>();
   app.post("/api/admin/request-otp", async (req, res) => {
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    tempOtps.set("admin", otp);
-    
-    await sendTelegramNotification(`<b>🛡 Admin 3FA OTP:</b> <code>${otp}</code>\nValid for 5 minutes.`);
-    
-    // Expire in 5 mins
-    setTimeout(() => tempOtps.delete("admin"), 300000);
-    res.json({ success: true });
+    try {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Store OTP in Firestore because Vercel Serverless memory is wiped between requests
+      if (db) {
+        await setDoc(doc(db, "settings", "adminOtp"), { 
+          otp, 
+          expiresAt: Date.now() + 300000 // 5 minutes
+        });
+      } else {
+        // Fallback for local dev if DB is missing
+        (global as any).tempAdminOtp = otp;
+      }
+      
+      await sendTelegramNotification(`<b>🛡 Admin 3FA OTP:</b> <code>${otp}</code>\nValid for 5 minutes.`);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error in request-otp:", err);
+      res.status(500).json({ error: "Failed to send OTP via Telegram" });
+    }
   });
 
-  app.post("/api/admin/verify-otp", (req, res) => {
-    const { otp } = req.body;
-    if (tempOtps.get("admin") === otp) {
-      tempOtps.delete("admin");
-      res.json({ success: true });
-    } else {
-      res.status(400).json({ error: "Invalid OTP" });
+  app.post("/api/admin/verify-otp", async (req, res) => {
+    try {
+      const { otp } = req.body;
+      let isValid = false;
+
+      if (db) {
+        const otpDoc = await getDoc(doc(db, "settings", "adminOtp"));
+        if (otpDoc.exists()) {
+          const data = otpDoc.data();
+          if (data.otp === otp && Date.now() < data.expiresAt) {
+            isValid = true;
+            // Invalidate OTP after use
+            await setDoc(doc(db, "settings", "adminOtp"), { otp: null, expiresAt: 0 });
+          }
+        }
+      } else {
+        if ((global as any).tempAdminOtp === otp) {
+          isValid = true;
+          (global as any).tempAdminOtp = null;
+        }
+      }
+
+      if (isValid) {
+        res.json({ success: true });
+      } else {
+        res.status(400).json({ error: "Invalid or expired OTP" });
+      }
+    } catch (err) {
+      console.error("Error verifying OTP:", err);
+      res.status(500).json({ error: "Failed to verify OTP" });
     }
   });
 
