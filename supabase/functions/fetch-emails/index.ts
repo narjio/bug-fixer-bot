@@ -7,10 +7,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PASSWORD_RESET_KEYWORDS = [
-  "password reset", "reset your password", "forgot password",
-  "change your password", "password change", "reset password",
-  "verify your password", "account recovery", "recover your account",
+// Only skip emails with these SUBJECTS (not body text)
+const PASSWORD_RESET_SUBJECTS = [
+  "reset your password", "forgot password", "password reset",
+  "change your password", "password change",
 ];
 
 Deno.serve(async (req) => {
@@ -70,6 +70,8 @@ Deno.serve(async (req) => {
     });
 
     const emails: any[] = [];
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; }, 22000);
 
     try {
       await client.connect();
@@ -77,18 +79,43 @@ Deno.serve(async (req) => {
       const lock = await client.getMailboxLock("INBOX");
 
       try {
-        // IMAP SEARCH for emails FROM info@account.netflix.com only
-        console.log("Searching for Netflix emails (from: info@account.netflix.com)...");
-        const searchResults = await client.search({ from: "info@account.netflix.com" });
-        console.log("Found", searchResults.length, "Netflix emails total");
+        const totalMessages = (client.mailbox as any)?.exists || 0;
+        console.log("Total messages:", totalMessages);
 
-        if (searchResults.length > 0) {
-          // Take only last 20 UIDs (most recent)
-          const recentUids = searchResults.slice(-20);
-          
-          for (const uid of recentUids) {
+        if (totalMessages > 0) {
+          // Fetch last 50 messages envelopes (fast, no body download)
+          const startSeq = Math.max(1, totalMessages - 49);
+          const range = `${startSeq}:${totalMessages}`;
+          console.log("Scanning range:", range);
+
+          // Step 1: Get envelopes to find Netflix emails
+          const netflixMessages: { seq: number; uid: number; subject: string }[] = [];
+          for await (const message of client.fetch(range, { envelope: true, uid: true })) {
+            if (timedOut) break;
+            const fromAddr = message.envelope?.from?.[0]?.address?.toLowerCase() || "";
+            // ONLY emails from info@account.netflix.com
+            if (fromAddr === "info@account.netflix.com") {
+              const subject = message.envelope?.subject || "";
+              const subjectLower = subject.toLowerCase();
+              // Skip password reset emails by SUBJECT only
+              const isPasswordReset = PASSWORD_RESET_SUBJECTS.some(kw => subjectLower.includes(kw));
+              if (isPasswordReset) {
+                console.log("Skipping password reset:", subject);
+                continue;
+              }
+              netflixMessages.push({ seq: message.seq, uid: message.uid, subject });
+            }
+          }
+          console.log("Found", netflixMessages.length, "Netflix emails (after password reset filter)");
+
+          // Step 2: Fetch full source for Netflix emails only
+          for (const msg of netflixMessages) {
+            if (timedOut) {
+              console.log("Timeout reached, returning what we have");
+              break;
+            }
             try {
-              const fullMsg = await client.fetchOne(uid, { source: true }, { uid: true });
+              const fullMsg = await client.fetchOne(msg.uid, { source: true }, { uid: true });
               if (!fullMsg?.source) continue;
 
               const parsed = await simpleParser(fullMsg.source, {
@@ -96,27 +123,14 @@ Deno.serve(async (req) => {
                 skipTextLinks: true,
               });
 
-              const subject = (parsed.subject || "").trim();
               const bodyText = (parsed.text || "").trim();
-              const fromText = parsed.from?.text || "";
-              const normalizedContent = `${subject}\n${fromText}\n${bodyText}`.toLowerCase();
-
-              // Skip password reset emails
-              const isPasswordReset = PASSWORD_RESET_KEYWORDS.some((kw) =>
-                normalizedContent.includes(kw)
-              );
-              if (isPasswordReset) {
-                console.log("Skipping password reset:", subject);
-                continue;
-              }
-
               const otpMatch = bodyText.match(/\b\d{4,8}\b/);
               const otp = otpMatch ? otpMatch[0] : null;
 
               emails.push({
-                id: uid,
-                subject: parsed.subject,
-                from: parsed.from?.text,
+                id: msg.uid,
+                subject: parsed.subject || msg.subject,
+                from: parsed.from?.text || "Netflix <info@account.netflix.com>",
                 to: parsed.to
                   ? Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text
                   : undefined,
@@ -125,14 +139,14 @@ Deno.serve(async (req) => {
                 preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
                 html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
               });
-              console.log("Added Netflix email:", subject);
+              console.log("Added:", msg.subject);
             } catch (parseErr) {
-              console.error("Parse error for UID", uid, ":", parseErr);
+              console.error("Parse error:", parseErr);
             }
           }
         }
 
-        console.log("Collected", emails.length, "Netflix emails (password reset excluded)");
+        console.log("Collected", emails.length, "Netflix emails");
       } finally {
         lock.release();
       }
@@ -141,6 +155,8 @@ Deno.serve(async (req) => {
     } catch (connErr) {
       if (emails.length === 0) throw connErr;
       console.error("IMAP error (returning partial):", connErr);
+    } finally {
+      clearTimeout(timeout);
     }
 
     emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
