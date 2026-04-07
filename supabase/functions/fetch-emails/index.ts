@@ -90,8 +90,8 @@ Deno.serve(async (req) => {
         console.log("Total messages in INBOX:", totalMessages);
 
         if (totalMessages > 0) {
-          // Scan the last 50 messages to find emails quickly
-          const startSeq = Math.max(1, totalMessages - 49);
+          // Scan the last 20 messages for speed
+          const startSeq = Math.max(1, totalMessages - 19);
           const range = `${startSeq}:${totalMessages}`;
           console.log("Scanning range:", range);
 
