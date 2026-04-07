@@ -163,14 +163,20 @@ function ProfileSelectPage() {
   const [loading, setLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState("");
+  const [siteKey, setSiteKey] = useState<string | null>(null);
+  const [showCaptcha, setShowCaptcha] = useState(false);
   const navigate = useNavigate();
   const { checkAuth } = useAuth();
 
   useEffect(() => {
     (async () => {
       try {
-        const data = await apiCall("manage-app", { action: "list" });
-        setProfiles((data.users || []).filter((u: UserData) => u.role === "user"));
+        const [usersData, recaptchaData] = await Promise.all([
+          apiCall("manage-app", { action: "list" }),
+          apiCall("manage-app", { action: "get_settings", key: "recaptcha" }).catch(() => ({ value: null })),
+        ]);
+        setProfiles((usersData.users || []).filter((u: UserData) => u.role === "user"));
+        if (recaptchaData.value?.siteKey) setSiteKey(recaptchaData.value.siteKey);
       } catch (err) {
         console.error("Failed to load profiles:", err);
       } finally {
@@ -179,8 +185,12 @@ function ProfileSelectPage() {
     })();
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const initiateLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (siteKey) { setShowCaptcha(true); } else { executeLogin(); }
+  };
+
+  const executeLogin = async () => {
     if (!selectedProfile) return;
     setLoginLoading(true);
     setError("");
@@ -200,7 +210,6 @@ function ProfileSelectPage() {
       localStorage.setItem("user", JSON.stringify(data.user));
       checkAuth();
 
-      // Send login notification
       try {
         await apiCall("send-login-notification", {
           username: data.user.username,
@@ -236,13 +245,8 @@ function ProfileSelectPage() {
 
       <AnimatePresence mode="wait">
         {!selectedProfile ? (
-          <motion.div
-            key="profiles"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="relative z-10 w-full max-w-lg"
-          >
+          <motion.div key="profiles" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            className="relative z-10 w-full max-w-lg">
             <div className="flex justify-center mb-6">
               <div className="bg-red-600 p-3 rounded-2xl shadow-lg shadow-red-900/30">
                 <Mail className="text-white w-7 h-7" />
@@ -258,83 +262,59 @@ function ProfileSelectPage() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 justify-items-center">
                 {profiles.map((profile, i) => (
-                  <motion.button
-                    key={profile.id}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setSelectedProfile(profile)}
-                    className="flex flex-col items-center gap-3 group"
-                  >
+                  <motion.button key={profile.id} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    onClick={() => setSelectedProfile(profile)} className="flex flex-col items-center gap-3 group">
                     <div className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${PROFILE_COLORS[i % PROFILE_COLORS.length]} flex items-center justify-center shadow-lg group-hover:ring-2 group-hover:ring-white/50 transition-all`}>
-                      <span className="text-white text-2xl sm:text-3xl font-black">
-                        {profile.name.charAt(0).toUpperCase()}
-                      </span>
+                      <span className="text-white text-2xl sm:text-3xl font-black">{profile.name.charAt(0).toUpperCase()}</span>
                     </div>
-                    <span className="text-slate-300 font-bold text-sm group-hover:text-white transition-colors">
-                      {profile.name}
-                    </span>
+                    <span className="text-slate-300 font-bold text-sm group-hover:text-white transition-colors">{profile.name}</span>
                   </motion.button>
                 ))}
               </div>
             )}
-
-            {/* Admin access hidden - use /admin directly */}
           </motion.div>
         ) : (
-          <motion.div
-            key="password"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="relative z-10 w-full max-w-sm"
-          >
-            <button
-              onClick={() => { setSelectedProfile(null); setPassword(""); setError(""); }}
-              className="text-slate-400 hover:text-white text-sm font-bold mb-6 flex items-center gap-1 transition-colors"
-            >
+          <motion.div key="password" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            className="relative z-10 w-full max-w-sm">
+            <button onClick={() => { setSelectedProfile(null); setPassword(""); setError(""); }}
+              className="text-slate-400 hover:text-white text-sm font-bold mb-6 flex items-center gap-1 transition-colors">
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
 
             <div className="flex flex-col items-center mb-6">
               <div className={`w-20 h-20 rounded-2xl ${PROFILE_COLORS[profiles.indexOf(selectedProfile) % PROFILE_COLORS.length]} flex items-center justify-center shadow-lg mb-3`}>
-                <span className="text-white text-2xl font-black">
-                  {selectedProfile.name.charAt(0).toUpperCase()}
-                </span>
+                <span className="text-white text-2xl font-black">{selectedProfile.name.charAt(0).toUpperCase()}</span>
               </div>
               <h2 className="text-xl font-black text-white">{selectedProfile.name}</h2>
               <p className="text-slate-400 text-sm">@{selectedProfile.username}</p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={initiateLogin} className="space-y-4">
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-2xl py-4 pl-12 pr-4 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all outline-none placeholder:text-slate-600"
-                  placeholder="Enter password"
-                  autoFocus
-                  required
-                />
+                  placeholder="Enter password" autoFocus required />
               </div>
 
               {error && (
                 <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-3 rounded-xl flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full bg-red-600 text-white font-bold py-4 rounded-2xl hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50"
-              >
+              <button type="submit" disabled={loginLoading}
+                className="w-full bg-red-600 text-white font-bold py-4 rounded-2xl hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50">
                 {loginLoading ? "Verifying..." : "Sign In"}
               </button>
             </form>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCaptcha && siteKey && (
+          <CaptchaModal siteKey={siteKey} onVerify={() => { setShowCaptcha(false); executeLogin(); }} onCancel={() => setShowCaptcha(false)} />
         )}
       </AnimatePresence>
     </div>
