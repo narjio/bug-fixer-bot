@@ -235,12 +235,7 @@ function ProfileSelectPage() {
               </div>
             )}
 
-            <button
-              onClick={() => navigate("/admin-login")}
-              className="block mx-auto mt-10 text-slate-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors"
-            >
-              Admin Access →
-            </button>
+            {/* Admin access hidden - use /admin directly */}
           </motion.div>
         ) : (
           <motion.div
@@ -453,7 +448,7 @@ function AdminAuthPage() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user || user.role !== "admin") { navigate("/admin-login"); return; }
+    if (!user || user.role !== "admin") { navigate("/admin"); return; }
 
     if (step === 1 && !otpRequested.current) {
       otpRequested.current = true;
@@ -514,7 +509,7 @@ function AdminAuthPage() {
       const result = await verify({ secret, token: totp });
       if (result && (result as any).delta !== undefined) {
         localStorage.setItem("admin_auth", "true");
-        navigate("/admin");
+        navigate("/admin/dashboard");
       } else {
         throw new Error("Invalid Google Auth Code");
       }
@@ -964,10 +959,10 @@ function EmailViewer() {
       });
     }, 1000);
 
-    // IMAP sync every 15 seconds (background)
+    // IMAP sync every 10 seconds (background)
     syncIntervalRef.current = setInterval(() => {
       syncFromImap();
-    }, 15000);
+    }, 10000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -1002,22 +997,13 @@ function EmailViewer() {
               <span className="text-[10px] sm:text-xs font-bold text-slate-600 truncate max-w-[60px] sm:max-w-[120px]">{user.name}</span>
             </div>
           </div>
-          <div className="flex items-center gap-1 sm:gap-3 flex-shrink-0">
-            <div className="flex flex-col items-end mr-0.5 sm:mr-2">
-              <span className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase leading-tight">Refresh</span>
-              <span className="text-xs sm:text-sm font-mono font-bold text-red-600">{countdown}s</span>
-            </div>
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             <button onClick={() => fetchEmails()}
-              className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all active:scale-95">
-              <RefreshCw className="w-4 h-4" />
+              disabled={syncing}
+              className="flex items-center gap-1.5 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
+              <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">Refresh</span>
             </button>
-            {syncing && (
-              <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                <RefreshCw className="w-3 h-3 animate-spin" />
-                <span className="hidden sm:inline">Syncing</span>
-              </div>
-            )}
             <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
               <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             </button>
@@ -1267,9 +1253,9 @@ export default function App() {
         <Toaster position="top-center" richColors />
         <Routes>
           <Route path="/" element={<ProfileSelectPage />} />
-          <Route path="/admin-login" element={<AdminLoginPage />} />
+          <Route path="/admin" element={<AdminLoginPage />} />
           <Route path="/admin-auth" element={<AdminAuthPage />} />
-          <Route path="/admin" element={<ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>} />
           <Route path="/viewer" element={<ProtectedRoute role="user"><EmailViewer /></ProtectedRoute>} />
         </Routes>
       </AuthProvider>
@@ -1280,7 +1266,7 @@ export default function App() {
 const ProtectedRoute = ({ children, role }: { children: React.ReactNode; role: "admin" | "user" }) => {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" /></div>;
-  if (!user) return <Navigate to={role === "admin" ? "/admin-login" : "/"} />;
+  if (!user) return <Navigate to={role === "admin" ? "/admin" : "/"} />;
   if (role === "admin" && user.role !== "admin") return <Navigate to="/" />;
   return <>{children}</>;
 };
