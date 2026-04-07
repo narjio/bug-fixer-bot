@@ -509,7 +509,7 @@ function AdminAuthPage() {
       const result = await verify({ secret, token: totp });
       if (result && (result as any).delta !== undefined) {
         localStorage.setItem("admin_auth", "true");
-        navigate("/admin");
+        navigate("/admin/dashboard");
       } else {
         throw new Error("Invalid Google Auth Code");
       }
