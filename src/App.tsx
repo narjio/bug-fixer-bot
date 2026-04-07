@@ -873,11 +873,16 @@ function EmailViewer() {
     setError(null);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25000);
-      console.log("[fetchEmails] Starting fetch...");
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      console.log("[fetchEmails] Starting fetch to", `${getApiBase()}/functions/v1/fetch-emails`);
       const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getApiKey()}` },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        },
+        body: JSON.stringify({}),
         signal: controller.signal,
       });
       clearTimeout(timeout);
