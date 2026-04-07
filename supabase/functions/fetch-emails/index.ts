@@ -172,11 +172,9 @@ Deno.serve(async (req) => {
         const alreadyCachedUids = netflixUids.filter(uid => cachedIds.has(String(uid)));
         console.log("New UIDs to fetch:", uncachedUids.length, "| Already cached:", alreadyCachedUids.length);
 
-        // Fetch uncached first, then cached (for updates)
-        const orderedUids = [...uncachedUids, ...alreadyCachedUids];
-
-        // Fetch full content for each Netflix email
-        for (const uid of orderedUids) {
+        // Only fetch NEW uncached emails — cached ones are already in DB
+        // Fetch full content for each new Netflix email
+        for (const uid of uncachedUids) {
           if (timedOut) {
             console.log("Timeout reached, returning what we have");
             break;
