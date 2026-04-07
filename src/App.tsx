@@ -334,31 +334,16 @@ function AdminLoginPage() {
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-      
-      const data = await safeJson(res);
-      if (!res.ok) {
-        throw new Error(data.error || "Invalid admin credentials");
+      // Query Firestore directly for admin user
+      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "admin"));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        throw new Error("Invalid admin credentials");
       }
-      
-      const userData = data.user;
-      
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
-          name: userData.name, 
-          status: "success", 
-          type: "admin",
-          lat: loc.lat,
-          lon: loc.lon
-        }),
-      });
+
+      const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      localStorage.setItem("user", JSON.stringify(userData));
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
@@ -366,19 +351,6 @@ function AdminLoginPage() {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
       setError(errorMsg);
       toast.error(errorMsg);
-      
-      // Only notify backend if it's not a location permission error
-      if (!errorMsg.includes("Location permission")) {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            username, 
-            status: "failed", 
-            type: "admin"
-          }),
-        });
-      }
     } finally {
       setLoading(false);
     }
