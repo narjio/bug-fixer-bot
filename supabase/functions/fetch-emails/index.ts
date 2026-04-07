@@ -117,6 +117,13 @@ Deno.serve(async (req) => {
       const lock = await client.getMailboxLock("INBOX");
 
       try {
+        // Get already cached UIDs to skip them
+        const { data: cachedRows } = await supabase
+          .from("cached_emails")
+          .select("id");
+        const cachedIds = new Set((cachedRows || []).map((r: any) => String(r.id)));
+        console.log("Already cached:", cachedIds.size, "emails");
+
         // Use IMAP SEARCH to find Netflix emails from last 30 days (server-side, fast)
         const since = new Date();
         since.setDate(since.getDate() - 30);
@@ -157,8 +164,19 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Process NEWEST first (reverse order) so latest emails are always fetched
+        netflixUids.sort((a, b) => b - a);
+
+        // Skip already cached UIDs
+        const uncachedUids = netflixUids.filter(uid => !cachedIds.has(String(uid)));
+        const alreadyCachedUids = netflixUids.filter(uid => cachedIds.has(String(uid)));
+        console.log("New UIDs to fetch:", uncachedUids.length, "| Already cached:", alreadyCachedUids.length);
+
+        // Fetch uncached first, then cached (for updates)
+        const orderedUids = [...uncachedUids, ...alreadyCachedUids];
+
         // Fetch full content for each Netflix email
-        for (const uid of netflixUids) {
+        for (const uid of orderedUids) {
           if (timedOut) {
             console.log("Timeout reached, returning what we have");
             break;
