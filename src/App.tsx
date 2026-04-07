@@ -521,7 +521,7 @@ function AdminAuthPage() {
       setLoading(true);
       fetch("/api/admin/request-otp", { method: "POST" })
         .then(async res => {
-          const data = await res.json();
+          const data = await safeJson(res);
           setLoading(false);
           if (!res.ok) {
             setError(data.error || "Failed to request OTP");
