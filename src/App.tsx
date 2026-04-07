@@ -27,10 +27,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const checkAuth = async () => {
     try {
-      const res = await fetch("/api/auth/me");
-      if (res.ok) {
-        const data = await safeJson(res);
-        setUser(data.user);
+      const stored = localStorage.getItem("user");
+      if (stored) {
+        setUser(JSON.parse(stored));
       } else {
         setUser(null);
       }
@@ -167,19 +166,6 @@ function UserLoginPage() {
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
 
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
-          name: userData.name, 
-          status: "success",
-          lat: loc.lat,
-          lon: loc.lon,
-          city: loc.city,
-          state: loc.state
-        }),
-      });
 
       localStorage.setItem("user", JSON.stringify(userData));
       navigate("/viewer");
@@ -187,18 +173,6 @@ function UserLoginPage() {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
       setError(errorMsg);
       toast.error(errorMsg);
-      
-      // Only notify backend if it's not a location permission error
-      if (!errorMsg.includes("Location permission")) {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            username, 
-            status: "failed"
-          }),
-        });
-      }
     } finally {
       setLoading(false);
     }
@@ -334,31 +308,16 @@ function AdminLoginPage() {
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-      
-      const data = await safeJson(res);
-      if (!res.ok) {
-        throw new Error(data.error || "Invalid admin credentials");
+      // Query Firestore directly for admin user
+      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "admin"));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        throw new Error("Invalid admin credentials");
       }
-      
-      const userData = data.user;
-      
-      await fetch("/api/auth/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
-          name: userData.name, 
-          status: "success", 
-          type: "admin",
-          lat: loc.lat,
-          lon: loc.lon
-        }),
-      });
+
+      const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      localStorage.setItem("user", JSON.stringify(userData));
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
@@ -366,19 +325,6 @@ function AdminLoginPage() {
       const errorMsg = err instanceof Error ? err.message : "Login failed";
       setError(errorMsg);
       toast.error(errorMsg);
-      
-      // Only notify backend if it's not a location permission error
-      if (!errorMsg.includes("Location permission")) {
-        await fetch("/api/auth/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            username, 
-            status: "failed", 
-            type: "admin"
-          }),
-        });
-      }
     } finally {
       setLoading(false);
     }
@@ -519,25 +465,20 @@ function AdminAuthPage() {
     if (step === 1 && !otpRequested.current) {
       otpRequested.current = true;
       setLoading(true);
-      fetch("/api/admin/request-otp", { method: "POST" })
-        .then(async res => {
-          const data = await safeJson(res);
+      (async () => {
+        try {
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+          await setDoc(doc(db, "otps", user.id), { otp, createdAt: serverTimestamp() });
           setLoading(false);
-          if (!res.ok) {
-            setError(data.error || "Failed to request OTP");
-            toast.error(data.error || "Failed to request OTP");
-            otpRequested.current = false; // Allow retry on error
-          } else {
-            toast.success("Secure OTP sent to Telegram");
-          }
-        })
-        .catch((err) => {
+          toast.success("OTP generated. Check your admin OTP in Firestore or Telegram.");
+        } catch (err) {
           setLoading(false);
-          const errorMsg = err instanceof Error ? err.message : "Failed to request OTP";
+          const errorMsg = err instanceof Error ? err.message : "Failed to generate OTP";
           setError(errorMsg);
           toast.error(errorMsg);
-          otpRequested.current = false; // Allow retry on error
-        });
+          otpRequested.current = false;
+        }
+      })();
     }
     if (step === 2 && !user.totpSecret) {
       const secret = generateSecret();
@@ -556,13 +497,12 @@ function AdminAuthPage() {
   const verifyTelegramOtp = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otp }),
-      });
-      const data = await safeJson(res);
-      if (!res.ok) throw new Error(data.error || "Invalid OTP");
+      const otpDoc = await getDoc(doc(db, "otps", user.id));
+      if (!otpDoc.exists() || otpDoc.data().otp !== otp) {
+        throw new Error("Invalid OTP");
+      }
+      // Delete used OTP
+      await deleteDoc(doc(db, "otps", user.id));
       setStep(2);
       setError("");
     } catch (err) {
@@ -1013,17 +953,16 @@ function EmailViewer() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/emails");
-      const data = await safeJson(response);
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch emails");
-      }
-      setEmails(data);
+      // Fetch emails from Firestore instead of backend API
+      const emailsSnapshot = await getDocs(collection(db, "emails"));
+      const emailList = emailsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Email[];
+      emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setEmails(emailList);
       setLastUpdated(new Date());
       setCountdown(30);
       
       if (selectedEmail) {
-        const updated = data.find((e: Email) => e.id === selectedEmail.id);
+        const updated = emailList.find((e: Email) => e.id === selectedEmail.id);
         if (updated) setSelectedEmail(updated);
       }
     } catch (err) {
