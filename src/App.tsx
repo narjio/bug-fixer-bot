@@ -513,8 +513,8 @@ function AdminAuthPage() {
       // Get user's totp secret from DB
       const userData = await apiCall("manage-app", { action: "login", username: user.username, password: "___skip___" }).catch(() => null);
       const secret = user.totpSecret || secretKey;
-      const result = verify({ secret, token: totp });
-      if (result) {
+      const result = await verify({ secret, token: totp });
+      if (result === true || (result as any)?.delta !== undefined) {
         localStorage.setItem("admin_auth", "true");
         navigate("/admin");
       } else {
