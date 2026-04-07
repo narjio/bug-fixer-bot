@@ -343,20 +343,40 @@ function AdminLoginPage() {
     setError("");
 
     try {
+      if (!checkRateLimit(`admin_${username}`)) {
+        throw new Error("Too many login attempts. Please wait 1 minute.");
+      }
+
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      // Query Firestore directly for admin user
-      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "admin"));
+      // Fetch admin by username only, then compare hashed password
+      const q = query(collection(db, "users"), where("username", "==", username), where("role", "==", "admin"));
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
         throw new Error("Invalid admin credentials");
       }
 
+      const storedPassword = snapshot.docs[0].data().password;
+      const isHashed = storedPassword && storedPassword.startsWith("$2");
+      const passwordMatch = isHashed
+        ? await bcrypt.compare(password, storedPassword)
+        : password === storedPassword;
+
+      if (!passwordMatch) {
+        throw new Error("Invalid admin credentials");
+      }
+
+      // Upgrade plain text to hash
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      if (!isHashed) {
+        const hash = await bcrypt.hash(password, 10);
+        await setDoc(doc(db, "users", userData.id), { password: hash }, { merge: true });
+      }
+
       localStorage.setItem("user", JSON.stringify(userData));
-      await checkAuth(); // Update auth context so AdminAuthPage sees the user
+      await checkAuth();
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
