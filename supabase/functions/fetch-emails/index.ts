@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
       console.log("Searching mailbox...");
       const uids = await client.search({ all: true });
       console.log("Found", uids?.length ?? 0, "total messages");
-      const latestUids = Array.isArray(uids) ? uids.slice(-10) : [];
+      const latestUids = Array.isArray(uids) ? uids.slice(-20) : [];
 
       if (latestUids.length > 0) {
         let msgCount = 0;
@@ -60,21 +60,22 @@ Deno.serve(async (req) => {
           const bodyText = parsed.text || "";
           const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
 
-          if (
+          // Skip password reset emails
+          const isPasswordReset =
             normalizedContent.includes("password reset") ||
-            normalizedContent.includes("reset your password")
-          ) {
+            normalizedContent.includes("reset your password") ||
+            normalizedContent.includes("forgot password") ||
+            normalizedContent.includes("change your password") ||
+            normalizedContent.includes("password change") ||
+            normalizedContent.includes("reset password");
+
+          if (isPasswordReset) {
+            console.log("Skipping password reset email:", subject);
             continue;
           }
 
+          // Try to detect OTP (for badge display only, not filtering)
           const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
-          const looksLikeOtp =
-            /(\botp\b|verification code|security code|passcode|one[- ]time code|login code|authentication code)/.test(
-              normalizedContent
-            );
-
-          if (!otpMatch && !looksLikeOtp) continue;
-
           const otp = otpMatch ? otpMatch[0] : null;
 
           emails.push({
