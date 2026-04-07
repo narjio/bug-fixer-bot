@@ -28,7 +28,6 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "express-session": "^1.19.0",
-    "firebase": "^12.11.0",
     "firebase-admin": "^13.7.0",
     "imapflow": "^1.2.18",
     "lucide-react": "^0.546.0",
