@@ -6,6 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const PASSWORD_RESET_KEYWORDS = [
+  "password reset",
+  "reset your password",
+  "forgot password",
+  "change your password",
+  "password change",
+  "reset password",
+  "verify your password",
+  "account recovery",
+  "recover your account",
+];
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -16,8 +28,6 @@ Deno.serve(async (req) => {
     const imapPort = parseInt(Deno.env.get("IMAP_PORT") || "993");
     const imapUser = Deno.env.get("IMAP_USER") || "";
     const imapPassword = Deno.env.get("IMAP_PASSWORD") || "";
-
-    console.log("IMAP config:", { host: imapHost, port: imapPort, user: imapUser ? "SET" : "EMPTY", pass: imapPassword ? "SET" : "EMPTY" });
 
     if (!imapUser || !imapPassword) {
       return new Response(
@@ -44,30 +54,30 @@ Deno.serve(async (req) => {
     const emails: any[] = [];
 
     try {
-      console.log("Searching mailbox...");
-      const uids = await client.search({ all: true });
-      console.log("Found", uids?.length ?? 0, "total messages");
-      const latestUids = Array.isArray(uids) ? uids.slice(-20) : [];
+      // Use mailbox.exists to get total count, then fetch only the latest N
+      const mailbox = client.mailbox;
+      const totalMessages = mailbox?.exists || 0;
+      console.log("Total messages in INBOX:", totalMessages);
 
-      if (latestUids.length > 0) {
+      if (totalMessages > 0) {
+        // Fetch last 30 messages by sequence number (no full scan needed)
+        const startSeq = Math.max(1, totalMessages - 29);
+        const range = `${startSeq}:${totalMessages}`;
+        console.log("Fetching range:", range);
+
         let msgCount = 0;
-        for await (const message of client.fetch(latestUids, { source: true })) {
+        for await (const message of client.fetch(range, { source: true })) {
           msgCount++;
-          console.log("Processing message", msgCount, "uid:", message.uid);
           if (!message.source) continue;
           const parsed = await simpleParser(message.source);
           const subject = parsed.subject || "";
           const bodyText = parsed.text || "";
           const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
 
-          // Skip password reset emails
-          const isPasswordReset =
-            normalizedContent.includes("password reset") ||
-            normalizedContent.includes("reset your password") ||
-            normalizedContent.includes("forgot password") ||
-            normalizedContent.includes("change your password") ||
-            normalizedContent.includes("password change") ||
-            normalizedContent.includes("reset password");
+          // Skip password reset emails only
+          const isPasswordReset = PASSWORD_RESET_KEYWORDS.some(keyword =>
+            normalizedContent.includes(keyword)
+          );
 
           if (isPasswordReset) {
             console.log("Skipping password reset email:", subject);
@@ -97,6 +107,7 @@ Deno.serve(async (req) => {
               parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
           });
         }
+        console.log("Processed", msgCount, "messages, kept", emails.length);
       }
     } finally {
       lock.release();

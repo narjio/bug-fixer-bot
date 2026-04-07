@@ -183,41 +183,41 @@ async function startServer() {
       const emails: any[] = [];
 
       try {
-        const uids = await client.search({ all: true });
-        const latestUids = Array.isArray(uids) ? uids.slice(-25) : [];
+        // Fetch last 30 messages by sequence number (fast, no full scan)
+        const totalMessages = (client.mailbox as any)?.exists || 0;
+        const startSeq = Math.max(1, totalMessages - 29);
+        const range = totalMessages > 0 ? `${startSeq}:${totalMessages}` : "1:*";
 
-        if (latestUids.length > 0) {
-          for await (let message of client.fetch(latestUids, { source: true })) {
-            if (!message.source) continue;
-            const parsed = await simpleParser(message.source as any);
-            const subject = parsed.subject || "";
-            const bodyText = parsed.text || "";
-            const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
+        const passwordResetKeywords = [
+          "password reset", "reset your password", "forgot password",
+          "change your password", "password change", "reset password",
+          "verify your password", "account recovery",
+        ];
 
-            if (normalizedContent.includes("password reset") || normalizedContent.includes("reset your password")) {
-              continue;
-            }
+        for await (let message of client.fetch(range, { source: true })) {
+          if (!message.source) continue;
+          const parsed = await simpleParser(message.source as any);
+          const subject = parsed.subject || "";
+          const bodyText = parsed.text || "";
+          const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
 
-            const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
-            const looksLikeOtp = /(\botp\b|verification code|security code|passcode|one[- ]time code|login code|authentication code)/.test(normalizedContent);
+          // Skip password reset emails only
+          const isPasswordReset = passwordResetKeywords.some(kw => normalizedContent.includes(kw));
+          if (isPasswordReset) continue;
 
-            if (!otpMatch && !looksLikeOtp) {
-              continue;
-            }
+          const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
+          const otp = otpMatch ? otpMatch[0] : null;
 
-            const otp = otpMatch ? otpMatch[0] : null;
-
-            emails.push({
-              id: message.uid,
-              subject: parsed.subject,
-              from: parsed.from?.text,
-              to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text) : undefined,
-              date: parsed.date,
-              otp,
-              preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
-              html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
-            });
-          }
+          emails.push({
+            id: message.uid,
+            subject: parsed.subject,
+            from: parsed.from?.text,
+            to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text) : undefined,
+            date: parsed.date,
+            otp,
+            preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
+            html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
+          });
         }
       } finally {
         lock.release();

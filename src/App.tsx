@@ -1106,14 +1106,16 @@ function EmailViewer() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [otpCopied, setOtpCopied] = useState(false);
-  const refreshIntervalSeconds = 15;
+  const refreshIntervalSeconds = 30;
   const [countdown, setCountdown] = useState(refreshIntervalSeconds);
+  const isFetchingRef = React.useRef(false);
   const navigate = useNavigate();
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const fetchEmails = async (isManual = false) => {
-    if (loading && isManual) return;
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -1159,6 +1161,7 @@ function EmailViewer() {
       setError(getErrorMessage(err, "An unknown error occurred"));
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   };
 
