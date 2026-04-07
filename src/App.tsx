@@ -728,7 +728,24 @@ function AdminPanel() {
             </div>
           </section>
 
-          {/* Create User */}
+          {/* Change Admin Password */}
+          <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
+            <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
+              <Key className="w-5 h-5 text-red-600" />Change Password
+            </h2>
+            <div className="space-y-3">
+              <input type="password" placeholder="Current Password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+                className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+              <input type="password" placeholder="New Password" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)}
+                className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+              <button onClick={changeAdminPassword} disabled={changingPassword}
+                className="w-full bg-red-600 text-white font-bold py-3 rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50">
+                {changingPassword ? "Changing..." : "Change Password"}
+              </button>
+            </div>
+          </section>
+
+
           <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
             <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-red-600" />Create User
