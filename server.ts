@@ -7,7 +7,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
 
 dotenv.config();
@@ -30,13 +30,13 @@ async function getDynamicConfig() {
   const cleanEnv = (val: string | undefined) => (val && val !== "undefined" && val.trim() !== "") ? val.trim() : null;
 
   let config = {
-    TELEGRAM_BOT_TOKEN: cleanEnv(process.env.TELEGRAM_BOT_TOKEN) || "8575582532:AAE38rkI_zHmvmI8mZXdbYDp9ap3iT6mUGE", 
+    TELEGRAM_BOT_TOKEN: cleanEnv(process.env.TELEGRAM_BOT_TOKEN), 
     TELEGRAM_CHAT_ID: cleanEnv(process.env.TELEGRAM_CHAT_ID) || "769748540", 
-    ADMIN_EMAIL: cleanEnv(process.env.ADMIN_EMAIL) || "omdevsinhgohil538@gmail.com", 
+    ADMIN_EMAIL: cleanEnv(process.env.ADMIN_EMAIL) || "admin@example.com", 
     ADMIN_PASSWORD: cleanEnv(process.env.ADMIN_INITIAL_PASSWORD) || "admin123", 
     IMAP_HOST: cleanEnv(process.env.IMAP_HOST) || "imap.gmail.com",
     IMAP_PORT: parseInt(cleanEnv(process.env.IMAP_PORT) || "993"),
-    IMAP_USER: cleanEnv(process.env.IMAP_USER) || "omdevsinhgohil538@gmail.com", 
+    IMAP_USER: cleanEnv(process.env.IMAP_USER) || "", 
     IMAP_PASSWORD: cleanEnv(process.env.IMAP_PASSWORD) || "", 
   };
 
@@ -45,7 +45,6 @@ async function getDynamicConfig() {
       const docSnap = await getDoc(doc(db, "settings", "config"));
       if (docSnap.exists()) {
         const data = docSnap.data();
-        // Only override if the database value is actually set (not empty)
         if (data.TELEGRAM_BOT_TOKEN?.trim()) config.TELEGRAM_BOT_TOKEN = data.TELEGRAM_BOT_TOKEN.trim();
         if (data.TELEGRAM_CHAT_ID?.trim()) config.TELEGRAM_CHAT_ID = data.TELEGRAM_CHAT_ID.trim();
         if (data.ADMIN_EMAIL?.trim()) config.ADMIN_EMAIL = data.ADMIN_EMAIL.trim();
@@ -59,6 +58,11 @@ async function getDynamicConfig() {
       console.error("Error fetching config from Firestore:", err);
     }
   }
+
+  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
+    throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured in Firestore or Environment Variables.");
+  }
+
   return config;
 }
 
