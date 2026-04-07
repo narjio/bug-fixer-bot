@@ -1221,7 +1221,19 @@ function EmailViewer() {
                     </div>
                   )}
                   <div className="email-html-wrapper">
-                    <div className="gmail-style-content" dangerouslySetInnerHTML={{ __html: selectedEmail.html }} />
+                    <iframe
+                      srcDoc={`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:8px;font-family:sans-serif;font-size:14px;color:#334155;overflow-x:hidden;word-break:break-word}img{max-width:100%!important;height:auto!important}table{max-width:100%!important;width:100%!important}td,th{max-width:100%!important;overflow:hidden}a{color:#e11d48}*{box-sizing:border-box}</style></head><body>${selectedEmail.html}</body></html>`}
+                      sandbox="allow-same-origin"
+                      className="w-full border-0"
+                      style={{ minHeight: "400px" }}
+                      title="Email content"
+                      onLoad={(e) => {
+                        const iframe = e.target as HTMLIFrameElement;
+                        if (iframe.contentDocument?.body) {
+                          iframe.style.height = iframe.contentDocument.body.scrollHeight + 20 + "px";
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               </motion.div>
