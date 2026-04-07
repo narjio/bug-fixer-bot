@@ -1161,6 +1161,7 @@ function EmailViewer() {
       setError(getErrorMessage(err, "An unknown error occurred"));
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   };
 
