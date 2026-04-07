@@ -964,10 +964,10 @@ function EmailViewer() {
       });
     }, 1000);
 
-    // IMAP sync every 2 minutes (background)
+    // IMAP sync every 10 seconds (background)
     syncIntervalRef.current = setInterval(() => {
       syncFromImap();
-    }, 120000);
+    }, 10000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
