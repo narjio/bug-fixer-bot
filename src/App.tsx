@@ -169,10 +169,15 @@ function UserLoginPage() {
     setError("");
 
     try {
+      if (!checkRateLimit(`user_${username}`)) {
+        throw new Error("Too many login attempts. Please wait 1 minute.");
+      }
+
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      const q = query(collection(db, "users"), where("username", "==", username), where("password", "==", password), where("role", "==", "user"));
+      // Fetch user by username only, then compare hashed password
+      const q = query(collection(db, "users"), where("username", "==", username), where("role", "==", "user"));
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
@@ -180,7 +185,23 @@ function UserLoginPage() {
       }
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
+      const storedPassword = snapshot.docs[0].data().password;
 
+      // Support both hashed and plain text passwords (for migration)
+      const isHashed = storedPassword && storedPassword.startsWith("$2");
+      const passwordMatch = isHashed
+        ? await bcrypt.compare(password, storedPassword)
+        : password === storedPassword;
+
+      if (!passwordMatch) {
+        throw new Error("Invalid username or password");
+      }
+
+      // If password was plain text, upgrade to hash
+      if (!isHashed) {
+        const hash = await bcrypt.hash(password, 10);
+        await setDoc(doc(db, "users", userData.id), { password: hash }, { merge: true });
+      }
 
       localStorage.setItem("user", JSON.stringify(userData));
       await checkAuth();
