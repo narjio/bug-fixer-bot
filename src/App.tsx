@@ -598,15 +598,18 @@ function AdminPanel() {
   const [newName, setNewName] = useState("");
   const [siteKey, setSiteKey] = useState("");
   const [secretKeyVal, setSecretKeyVal] = useState("");
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
+  const [changingUserPass, setChangingUserPass] = useState<string | null>(null);
+  const [userNewPass, setUserNewPass] = useState("");
   const [serverConfig, setServerConfig] = useState({
     TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "", IMAP_HOST: "", IMAP_PORT: "", IMAP_USER: "", IMAP_PASSWORD: "",
   });
   const [savingConfig, setSavingConfig] = useState(false);
   const navigate = useNavigate();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, checkAuth } = useAuth();
 
   useEffect(() => {
     (async () => {
@@ -617,7 +620,11 @@ function AdminPanel() {
 
       try {
         const recaptcha = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
-        if (recaptcha.value) { setSiteKey(recaptcha.value.siteKey || ""); setSecretKeyVal(recaptcha.value.secretKey || ""); }
+        if (recaptcha.value) {
+          setSiteKey(recaptcha.value.siteKey || "");
+          setSecretKeyVal(recaptcha.value.secretKey || "");
+          setCaptchaEnabled(!!(recaptcha.value.siteKey));
+        }
       } catch {}
 
       try {
@@ -627,8 +634,24 @@ function AdminPanel() {
     })();
   }, []);
 
+  const toggleCaptcha = async () => {
+    if (captchaEnabled) {
+      // Disable: clear keys
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey: "", secretKey: "" } });
+      setSiteKey(""); setSecretKeyVal("");
+      setCaptchaEnabled(false);
+      toast.success("CAPTCHA disabled!");
+    } else {
+      if (!siteKey || !secretKeyVal) { toast.error("Enter both Site Key and Secret Key first"); return; }
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
+      setCaptchaEnabled(true);
+      toast.success("CAPTCHA enabled!");
+    }
+  };
+
   const saveRecaptchaSettings = async () => {
     await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
+    setCaptchaEnabled(!!(siteKey));
     toast.success("ReCAPTCHA settings saved!");
   };
 
@@ -663,6 +686,23 @@ function AdminPanel() {
     }
   };
 
+  const changeUserPassword = async (userId: string) => {
+    if (!userNewPass || userNewPass.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    try {
+      await apiCall("manage-app", { action: "change_password", id: userId, new_password: userNewPass });
+      setUserNewPass(""); setChangingUserPass(null);
+      toast.success("User password changed!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change password");
+    }
+  };
+
+  const loginAsUser = (user: UserData) => {
+    localStorage.setItem("user", JSON.stringify({ ...user, mustChangePassword: false }));
+    checkAuth();
+    navigate("/viewer");
+    toast.success(`Logged in as ${user.name}`);
+  };
 
   const createUser = async () => {
     if (!newUsername || !newPassword || !newName) { toast.error("Please fill all fields"); return; }
@@ -703,25 +743,32 @@ function AdminPanel() {
 
       <main className="max-w-6xl mx-auto p-2 sm:p-4 py-4 sm:py-8 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
         <div className="lg:col-span-1 space-y-6">
-          {/* ReCAPTCHA */}
+          {/* ReCAPTCHA with toggle */}
           <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
-            <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-red-600" />ReCAPTCHA Settings
-            </h2>
-            <div className="space-y-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-black text-base sm:text-lg flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-red-600" />CAPTCHA
+              </h2>
+              <button onClick={toggleCaptcha}
+                className={`relative w-12 h-6 rounded-full transition-colors ${captchaEnabled ? "bg-green-500" : "bg-slate-300"}`}>
+                <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${captchaEnabled ? "translate-x-6" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">{captchaEnabled ? "CAPTCHA is active on all logins" : "CAPTCHA is disabled"}</p>
+            <div className="space-y-3">
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-2 ml-1">Site Key</label>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Site Key</label>
                 <input type="text" placeholder="Enter Site Key" value={siteKey} onChange={(e) => setSiteKey(e.target.value)}
-                  className="w-full bg-slate-50 border rounded-2xl p-4 outline-none focus:ring-2 focus:ring-red-500" />
+                  className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-2 ml-1">Secret Key</label>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Secret Key</label>
                 <input type="password" placeholder="Enter Secret Key" value={secretKeyVal} onChange={(e) => setSecretKeyVal(e.target.value)}
-                  className="w-full bg-slate-50 border rounded-2xl p-4 outline-none focus:ring-2 focus:ring-red-500" />
+                  className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
               </div>
               <button onClick={saveRecaptchaSettings}
-                className="w-full bg-red-600 text-white font-bold py-3 rounded-2xl hover:bg-red-700 transition-all">
-                Save ReCAPTCHA
+                className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all text-sm">
+                Save Keys
               </button>
             </div>
           </section>
@@ -737,13 +784,13 @@ function AdminPanel() {
               <input type="password" placeholder="New Password" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)}
                 className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
               <button onClick={changeAdminPassword} disabled={changingPassword}
-                className="w-full bg-red-600 text-white font-bold py-3 rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50">
+                className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 text-sm">
                 {changingPassword ? "Changing..." : "Change Password"}
               </button>
             </div>
           </section>
 
-
+          {/* Create User */}
           <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
             <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-red-600" />Create User
@@ -756,7 +803,7 @@ function AdminPanel() {
               <input type="password" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
               <button onClick={createUser}
-                className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl hover:bg-slate-800 transition-all">
+                className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 transition-all text-sm">
                 Create User
               </button>
             </div>
@@ -822,22 +869,45 @@ function AdminPanel() {
             </button>
           </section>
 
-          {/* Users List */}
+          {/* Users List with actions */}
           <section className="bg-white p-4 sm:p-6 rounded-2xl border shadow-sm">
             <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
               <Users className="w-5 h-5 text-red-600" />Active Users
             </h2>
             <div className="space-y-3">
               {users.map(u => (
-                <div key={u.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div>
-                    <p className="font-bold text-slate-900">{u.name}</p>
-                    <p className="text-xs text-slate-500">@{u.username} • {u.role}</p>
+                <div key={u.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-slate-900">{u.name}</p>
+                      <p className="text-xs text-slate-500">@{u.username} • {u.role}</p>
+                    </div>
+                    {u.role !== "admin" && (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => loginAsUser(u)} title="Login as user"
+                          className="p-2 hover:bg-blue-50 text-blue-400 hover:text-blue-600 rounded-lg transition-colors">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => { setChangingUserPass(changingUserPass === u.id ? null : u.id); setUserNewPass(""); }} title="Change password"
+                          className="p-2 hover:bg-amber-50 text-amber-400 hover:text-amber-600 rounded-lg transition-colors">
+                          <KeyRound className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => deleteUser(u.id)} title="Delete user"
+                          className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {u.role !== "admin" && (
-                    <button onClick={() => deleteUser(u.id)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                  {changingUserPass === u.id && u.role !== "admin" && (
+                    <div className="mt-3 flex gap-2">
+                      <input type="password" placeholder="New password (min 6)" value={userNewPass} onChange={(e) => setUserNewPass(e.target.value)}
+                        className="flex-1 bg-white border rounded-lg p-2 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+                      <button onClick={() => changeUserPassword(u.id)}
+                        className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-all">
+                        Save
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}
