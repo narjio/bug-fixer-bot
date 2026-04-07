@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
 <b>User:</b> ${displayName}
 <b>Status:</b> ${statusEmoji}
 <b>Location:</b> ${locationData}${mapsLink}
-<b>Time:</b> ${new Date().toLocaleString()}
+<b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
     `.trim();
 
     const telegramRes = await fetch(`https://api.telegram.org/bot${tgConfig.botToken}/sendMessage`, {
