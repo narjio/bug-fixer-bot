@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, createContext, useContext } from "react";
 import { Mail, RefreshCw, ShieldCheck, Clock, AlertCircle, Copy, Check, ArrowLeft, User, Lock, Send, Key, LogOut, Settings, Plus, Users, Trash2, CheckCircle2, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom";
@@ -6,6 +6,37 @@ import { db, auth } from "./firebase";
 import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { generateSecret, generateURI, verify } from "otplib";
 import { QRCodeSVG } from "qrcode.react";
+
+// Auth Context
+const AuthContext = createContext<{ user: any, loading: boolean, checkAuth: () => Promise<void> } | null>(null);
+
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const checkAuth = async () => {
+    try {
+      const res = await fetch("/api/auth/me");
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { checkAuth(); }, []);
+
+  return <AuthContext.Provider value={{ user, loading, checkAuth }}>{children}</AuthContext.Provider>;
+};
+
+export const useAuth = () => useContext(AuthContext)!;
+
 
 // --- Types ---
 interface Email {
@@ -292,55 +323,18 @@ function AdminLoginPage() {
       // Force location permission first before proceeding
       const loc = await getPreciseLocation();
 
-      const q = query(collection(db, "users"), where("username", "==", username));
-      const snapshot = await getDocs(q);
-
-      let userData: UserData;
-
-      if (snapshot.empty) {
-        const res = await fetch("/api/admin/bootstrap", { 
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username })
-        });
-        
-        if (!res.ok) {
-          throw new Error("Invalid admin credentials");
-        }
-        
-        const { password: initialPassword } = await res.json();
-
-        if (password === initialPassword) {
-          const docRef = await addDoc(collection(db, "users"), {
-            username,
-            password: initialPassword,
-            name: "Administrator",
-            role: "admin"
-          });
-          
-          await fetch("/api/admin/reset", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username, password: initialPassword, type: "initial" }),
-          });
-          
-          userData = { id: docRef.id, username, password: initialPassword, name: "Administrator", role: "admin" } as UserData;
-          toast.success("Admin account initialized successfully!");
-        } else {
-          throw new Error("Invalid admin credentials");
-        }
-      } else {
-        const userDoc = snapshot.docs[0];
-        userData = { id: userDoc.id, ...userDoc.data() } as UserData;
-
-        if (userData.password !== password) {
-          throw new Error("Invalid admin credentials");
-        }
-
-        if (userData.role !== "admin") {
-          throw new Error("Access denied. Not an admin account.");
-        }
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Invalid admin credentials");
       }
+      
+      const { user: userData } = await res.json();
       
       await fetch("/api/auth/notify", {
         method: "POST",
@@ -355,7 +349,6 @@ function AdminLoginPage() {
         }),
       });
 
-      localStorage.setItem("user", JSON.stringify(userData));
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
     } catch (err) {
@@ -504,8 +497,7 @@ function AdminAuthPage() {
   const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
   const otpRequested = React.useRef(false);
-
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!user || user.role !== "admin") {
@@ -544,11 +536,9 @@ function AdminAuthPage() {
       });
       setQrCode(uri);
       setDoc(doc(db, "users", user.id), { totpSecret: secret }, { merge: true });
-      
-      const updatedUser = { ...user, totpSecret: secret };
-      localStorage.setItem("user", JSON.stringify(updatedUser));
     }
-  }, [step]);
+  }, [step, user]);
+
 
   const verifyTelegramOtp = async () => {
     setLoading(true);
@@ -558,11 +548,14 @@ function AdminAuthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ otp }),
       });
-      if (!res.ok) throw new Error("Invalid OTP");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Invalid OTP");
       setStep(2);
       setError("");
     } catch (err) {
-      setError("Invalid Telegram OTP");
+      const errorMsg = err instanceof Error ? err.message : "Invalid Telegram OTP";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -1333,18 +1326,29 @@ export default function App() {
 
   return (
     <Router>
-      <Toaster position="top-center" richColors />
-      <Routes>
-        <Route path="/" element={<UserLoginPage />} />
-        <Route path="/admin-login" element={<AdminLoginPage />} />
-        <Route path="/admin-auth" element={<AdminAuthPage />} />
-        <Route path="/admin" element={
-          localStorage.getItem("admin_auth") === "true" ? <AdminPanel /> : <Navigate to="/admin-login" />
-        } />
-        <Route path="/viewer" element={
-          localStorage.getItem("user") ? <EmailViewer /> : <Navigate to="/" />
-        } />
-      </Routes>
+      <AuthProvider>
+        <Toaster position="top-center" richColors />
+        <Routes>
+          <Route path="/" element={<UserLoginPage />} />
+          <Route path="/admin-login" element={<AdminLoginPage />} />
+          <Route path="/admin-auth" element={<AdminAuthPage />} />
+          <Route path="/admin" element={
+            <ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>
+          } />
+          <Route path="/viewer" element={
+            <ProtectedRoute role="user"><EmailViewer /></ProtectedRoute>
+          } />
+        </Routes>
+      </AuthProvider>
     </Router>
   );
 }
+
+const ProtectedRoute = ({ children, role }: { children: React.ReactNode, role: "admin" | "user" }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <div>Loading...</div>;
+  if (!user) return <Navigate to={role === "admin" ? "/admin-login" : "/"} />;
+  if (role === "admin" && user.role !== "admin") return <Navigate to="/" />;
+  return <>{children}</>;
+};
+

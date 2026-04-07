@@ -7,10 +7,20 @@ import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, collection, query, where, addDoc, getDocs } from "firebase/firestore";
 import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+import admin from "firebase-admin";
+import session from "express-session";
+import cookieParser from "cookie-parser";
+import { FirestoreStore } from "connect-firestore";
 
 dotenv.config();
+
+// Initialize Firebase Admin
+admin.initializeApp({
+  credential: admin.credential.applicationDefault()
+});
+const firestore = admin.firestore();
 
 // Load Firebase config gracefully via import so Vercel bundles it
 let db: any = null;
@@ -70,8 +80,25 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(cors());
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
+  app.use(cookieParser());
+  app.use(session({
+    store: new FirestoreStore({
+      dataset: firestore,
+      kind: 'sessions'
+    }),
+    secret: process.env.SESSION_SECRET || 'super-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 1000 * 60 * 60 * 24 // 24 hours
+    }
+  }));
+
+  // ... (API routes)
 
   // Helper to send Telegram notification
   async function sendTelegramNotification(message: string) {
@@ -191,8 +218,63 @@ async function startServer() {
     res.json({ success: true, location: locationData });
   });
 
+  // Admin Login
+  app.post("/api/admin/login", async (req, res) => {
+    const { username, password } = req.body;
+    
+    try {
+      const q = query(collection(db, "users"), where("username", "==", username));
+      const snapshot = await getDocs(q);
+      
+      let userData: any;
+      
+      if (snapshot.empty) {
+        // Bootstrap logic
+        const CONFIG = await getDynamicConfig();
+        if (username === CONFIG.ADMIN_EMAIL && password === CONFIG.ADMIN_PASSWORD) {
+          const docRef = await addDoc(collection(db, "users"), {
+            username,
+            password,
+            name: "Administrator",
+            role: "admin"
+          });
+          userData = { id: docRef.id, username, name: "Administrator", role: "admin" };
+        } else {
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+      } else {
+        const userDoc = snapshot.docs[0];
+        userData = { id: userDoc.id, ...userDoc.data() };
+        
+        if (userData.password !== password) {
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+        
+        if (userData.role !== "admin") {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+      
+      req.session.user = userData;
+      res.json({ success: true, user: userData });
+    } catch (err) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  // Check Auth Status
+  app.get("/api/auth/me", (req, res) => {
+    if (req.session.user) {
+      res.json({ user: req.session.user });
+    } else {
+      res.status(401).json({ error: "Not authenticated" });
+    }
+  });
+
   // Admin 3FA: Generate Telegram OTP
   app.post("/api/admin/request-otp", async (req, res) => {
+    if (!req.session.user) return res.status(401).json({ error: "Not authenticated" });
     try {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       
@@ -214,6 +296,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to send OTP via Telegram" });
     }
   });
+
 
   app.post("/api/admin/verify-otp", async (req, res) => {
     try {
@@ -251,13 +334,11 @@ async function startServer() {
   // Admin Reset/Initialize Notification
   app.post("/api/admin/reset", async (req, res) => {
     const { username, password, type } = req.body;
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     
     const message = `
 <b>🚨 Admin ${type === "initial" ? "Initialization" : "Reset"}</b>
 <b>Username:</b> <code>${username}</code>
 <b>Password:</b> <code>${password}</code>
-<b>IP:</b> ${ip}
 <b>Time:</b> ${new Date().toLocaleString()}
 
 <i>Please delete this message after saving credentials.</i>
