@@ -1255,7 +1255,7 @@ export default function App() {
           <Route path="/" element={<ProfileSelectPage />} />
           <Route path="/admin" element={<AdminLoginPage />} />
           <Route path="/admin-auth" element={<AdminAuthPage />} />
-          <Route path="/admin" element={<ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>} />
           <Route path="/viewer" element={<ProtectedRoute role="user"><EmailViewer /></ProtectedRoute>} />
         </Routes>
       </AuthProvider>
