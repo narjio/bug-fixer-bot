@@ -8,37 +8,33 @@ import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import fs from "fs";
+import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
 
 dotenv.config();
 
-// Load Firebase config gracefully
-const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+// Load Firebase config gracefully via import so Vercel bundles it
 let db: any = null;
-
 try {
-  if (fs.existsSync(firebaseConfigPath)) {
-    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    if (Object.keys(firebaseConfig).length > 0) {
-      const appFirebase = initializeApp(firebaseConfig);
-      db = getFirestore(appFirebase, firebaseConfig.firestoreDatabaseId);
-    }
+  if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
+    const appFirebase = initializeApp(firebaseConfig);
+    db = getFirestore(appFirebase, (firebaseConfig as any).firestoreDatabaseId);
+    console.log("Firebase initialized successfully on server.");
   }
 } catch (err) {
-  console.error("Failed to initialize Firebase Admin:", err);
+  console.error("Failed to initialize Firebase:", err);
 }
 
 // --- DYNAMIC CONFIGURATION ---
 // Helper to get the latest config, merging Environment Variables with Firestore Database
 async function getDynamicConfig() {
   let config = {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "", 
-    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || "", 
-    ADMIN_EMAIL: process.env.ADMIN_EMAIL || "", 
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "8575582532:AAE38rkI_zHmvmI8mZXdbYDp9ap3iT6mUGE", 
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || "769748540", 
+    ADMIN_EMAIL: process.env.ADMIN_EMAIL || "omdevsinhgohil538@gmail.com", 
     ADMIN_PASSWORD: process.env.ADMIN_INITIAL_PASSWORD || "admin123", 
     IMAP_HOST: process.env.IMAP_HOST || "imap.gmail.com",
     IMAP_PORT: parseInt(process.env.IMAP_PORT || "993"),
-    IMAP_USER: process.env.IMAP_USER || "", 
+    IMAP_USER: process.env.IMAP_USER || "omdevsinhgohil538@gmail.com", 
     IMAP_PASSWORD: process.env.IMAP_PASSWORD || "", 
   };
 
@@ -47,11 +43,15 @@ async function getDynamicConfig() {
       const docSnap = await getDoc(doc(db, "settings", "config"));
       if (docSnap.exists()) {
         const data = docSnap.data();
-        config = {
-          ...config,
-          ...data,
-          IMAP_PORT: data.IMAP_PORT ? parseInt(data.IMAP_PORT) : config.IMAP_PORT
-        };
+        // Only override if the database value is actually set (not empty)
+        if (data.TELEGRAM_BOT_TOKEN) config.TELEGRAM_BOT_TOKEN = data.TELEGRAM_BOT_TOKEN;
+        if (data.TELEGRAM_CHAT_ID) config.TELEGRAM_CHAT_ID = data.TELEGRAM_CHAT_ID;
+        if (data.ADMIN_EMAIL) config.ADMIN_EMAIL = data.ADMIN_EMAIL;
+        if (data.ADMIN_PASSWORD) config.ADMIN_PASSWORD = data.ADMIN_PASSWORD;
+        if (data.IMAP_HOST) config.IMAP_HOST = data.IMAP_HOST;
+        if (data.IMAP_PORT) config.IMAP_PORT = parseInt(data.IMAP_PORT);
+        if (data.IMAP_USER) config.IMAP_USER = data.IMAP_USER;
+        if (data.IMAP_PASSWORD) config.IMAP_PASSWORD = data.IMAP_PASSWORD;
       }
     } catch (err) {
       console.error("Error fetching config from Firestore:", err);
