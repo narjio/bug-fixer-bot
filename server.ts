@@ -139,21 +139,28 @@ async function startServer() {
       const emails: any[] = [];
 
       try {
-        const uids = await client.search({ from: "info@account.netflix.com" });
-        const latestUids = Array.isArray(uids) ? uids.slice(-10) : [];
+        const uids = await client.search({ all: true });
+        const latestUids = Array.isArray(uids) ? uids.slice(-25) : [];
 
         if (latestUids.length > 0) {
           for await (let message of client.fetch(latestUids, { source: true })) {
             if (!message.source) continue;
             const parsed = await simpleParser(message.source as any);
-            const subject = (parsed.subject || "").toLowerCase();
+            const subject = parsed.subject || "";
             const bodyText = parsed.text || "";
+            const normalizedContent = `${subject}\n${bodyText}`.toLowerCase();
 
-            if (subject.includes("password reset") || subject.includes("reset your password") || bodyText.toLowerCase().includes("reset your password")) {
+            if (normalizedContent.includes("password reset") || normalizedContent.includes("reset your password")) {
               continue;
             }
 
-            const otpMatch = bodyText.match(/\b\d{4,6}\b/);
+            const otpMatch = normalizedContent.match(/\b\d{4,8}\b/);
+            const looksLikeOtp = /(\botp\b|verification code|security code|passcode|one[- ]time code|login code|authentication code)/.test(normalizedContent);
+
+            if (!otpMatch && !looksLikeOtp) {
+              continue;
+            }
+
             const otp = otpMatch ? otpMatch[0] : null;
 
             emails.push({
@@ -163,7 +170,7 @@ async function startServer() {
               to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text) : undefined,
               date: parsed.date,
               otp,
-              preview: bodyText.substring(0, 100) + "...",
+              preview: bodyText.length > 100 ? `${bodyText.substring(0, 100)}...` : bodyText,
               html: parsed.html || parsed.textAsHtml || `<pre>${bodyText}</pre>`,
             });
           }

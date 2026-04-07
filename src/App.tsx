@@ -1053,9 +1053,16 @@ function EmailViewer() {
     setLoading(true);
     setError(null);
     try {
-      // Fetch emails from Firestore instead of backend API
-      const emailsSnapshot = await getDocs(collection(db, "emails"));
-      const emailList = emailsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Email[];
+      const response = await fetch("/api/emails", {
+        credentials: "include",
+      });
+      const data = await safeJson(response);
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to fetch emails.");
+      }
+
+      const emailList = (Array.isArray(data) ? data : []) as Email[];
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setLastUpdated(new Date());
