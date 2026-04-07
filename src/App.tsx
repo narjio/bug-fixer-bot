@@ -866,7 +866,7 @@ function EmailViewer() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const [syncing, setSyncing] = useState(false);
-  const syncIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  // syncIntervalRef removed — no more auto IMAP sync
 
   // Load cached emails from DB (instant)
   const loadCachedEmails = async () => {
