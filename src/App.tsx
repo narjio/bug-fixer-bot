@@ -1253,7 +1253,7 @@ export default function App() {
         <Toaster position="top-center" richColors />
         <Routes>
           <Route path="/" element={<ProfileSelectPage />} />
-          <Route path="/admin-login" element={<AdminLoginPage />} />
+          <Route path="/admin" element={<AdminLoginPage />} />
           <Route path="/admin-auth" element={<AdminAuthPage />} />
           <Route path="/admin" element={<ProtectedRoute role="admin"><AdminPanel /></ProtectedRoute>} />
           <Route path="/viewer" element={<ProtectedRoute role="user"><EmailViewer /></ProtectedRoute>} />
