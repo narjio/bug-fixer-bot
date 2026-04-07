@@ -1,69 +1,61 @@
 
 Goal
 
-- Inbox ko actually working banana using the uploaded ZIP’s working logic as the base.
-- Behavior same rakhna where possible, but insecure parts fix karna.
+- ZIP wali inbox logic same flow me lagani hai taaki emails actually show ho.
+- Existing Gmail-style inbox aur Netflix-style profiles ko mostly same rakhna hai.
 - Password reset emails hidden hi rahenge.
+- Jo clear vulnerabilities hain unko fix karna hai.
 
-What I found
+What I confirmed
 
-- Current viewer UI is not the main problem. `src/App.tsx` already renders any email array it receives.
-- Real mismatch: admin panel saves IMAP / Telegram / reCAPTCHA in `app_settings`, but runtime functions (`fetch-emails`, `send-telegram-otp`, `send-login-notification`) read only backend secrets. So admin panel me credentials save karne se live inbox change hi nahi hota.
-- Edge logs show IMAP connect ho raha hai and emails collect bhi ho rahe hain, so root issue likely wiring / source-of-truth / mailbox logic hai, not basic connection.
-- Current backend has serious vulnerabilities:
-  - `manage-app` has no real auth check for sensitive actions
-  - `app_users` public read exposes sensitive columns
-  - `app_settings` public read can expose secret values
-  - admin protection trusts `localStorage`, and 2FA state is not actually enforced on protected admin actions
+- IMAP/backend ab main blocker nahi lag raha: recent backend logs me `Collected 13 emails` dikh raha hai.
+- Iska matlab current “0 emails” issue frontend/request wiring me hai, not basic credentials.
+- Current app me duplicate flow hai:
+  - `src/App.tsx` direct backend function call kar raha hai
+  - `server.ts` me alag `/api/emails` proxy bhi hai
+  Ye preview aur Vercel behavior mismatch kara sakta hai.
+- Security abhi bhi weak hai:
+  - `app_users` public read se sensitive columns expose ho sakte hain
+  - `app_settings` public read se secret config expose ho sakta hai
+  - admin protection abhi true backend-enforced 2FA nahi hai
 
 Plan
 
-1. Review and transplant the ZIP logic
-- First implementation step will be to extract the uploaded ZIP and compare its `server.ts` and `src/App.tsx` line-by-line with the current app.
-- I’ll copy the reference inbox/request logic as closely as possible instead of continuing partial fixes.
+1. Transplant ZIP logic first
+- Implementation mode me uploaded ZIP extract karke uske `src/App.tsx` aur `server.ts` ka inbox flow line-by-line current app se match karunga.
+- Half-old / half-new flow nahi rakhenge.
 
-2. Fix the config source-of-truth
-- Remove the broken split where admin panel stores credentials in one place but email functions read another.
-- Use one secure backend source only for IMAP/Telegram runtime config.
-- Admin panel should update the same source the live inbox actually uses.
+2. Single inbox path use karna
+- Current duplicate email path hataunga.
+- Ek hi request path + ek hi response shape rakhenge, taaki backend emails collect kare aur frontend unhe `[]` me convert na kar de.
 
-3. Replace the email fetch flow with the ZIP behavior
-- Match the ZIP request path, response shape, and inbox loading flow as closely as possible.
-- Keep Gmail-style display.
-- Keep only one email exclusion rule: password reset emails hidden; normal Netflix and OTP mails visible.
+3. Email fetch flow ko ZIP ke behavior pe align karna
+- ZIP ka working request/parse/display flow copy karunga.
+- Normal mails aur Netflix mails visible rahenge.
+- Sirf password reset mails hide honge.
+- Recent scan fast rakhenge; full mailbox scan nahi.
 
-4. Secure the copied logic before shipping
-- Keep the reference behavior, but not its vulnerabilities.
-- Lock admin-only actions behind real backend validation.
-- Split public profile listing from admin mutations.
-- Stop exposing password hashes, TOTP secrets, IMAP password, Telegram tokens, and secret keys to the client.
+4. UI same, data plumbing replace
+- Gmail-style list/detail layout same rahega.
+- Netflix-style profile selection same rahega.
+- Sirf broken email loading/state logic ko ZIP ke working logic se replace karunga.
 
-5. Fix admin auth properly
-- Keep Netflix-style profile selection for users.
-- Make admin panel require actual verified admin state, not just `localStorage`.
-- Ensure second-factor completion is enforced before admin access.
+5. Security hardening while copying
+- Admin-only mutations ke liye real backend validation lagani hogi.
+- Admin panel access me completed 2FA enforce karna hoga.
+- Password hash, TOTP secret, IMAP password, Telegram token, secret keys client ko readable nahi rahenge.
+- Public profile list ke liye safe output/view use hoga.
 
-6. Tighten the inbox logic
-- Apply the ZIP’s logic, then preserve the good parts of the current mailbox handling:
-  - recent-mail scanning only
-  - no massive full-mailbox scan
-  - optional fallback mailbox handling if Netflix mail is not in INBOX
-- Differentiate “no matching emails” vs “mailbox/config error”.
-
-7. Align preview and deployed behavior
-- Make preview and Vercel use the same effective backend flow so live site cannot stay on stale/broken logic.
-- Remove duplicate or conflicting fetch paths.
-
-Validation
-
-- Admin-saved mail config immediately affects the real inbox logic.
-- Netflix / normal recent emails show in the inbox.
-- Password reset emails stay hidden.
-- Admin panel remains usable.
-- Sensitive backend data is no longer publicly readable.
+6. Preview + deployed behavior align
+- Preview aur Vercel dono ko same effective backend flow pe launga.
+- Stale/conflicting routes remove karunga.
+- Validation target ye hoga:
+  - inbox count backend ke collected mails ke saath match kare
+  - Netflix / normal emails show hon
+  - password reset emails hidden rahen
+  - admin panel usable rahe
 
 Technical details
 
-- Main files likely involved: `src/App.tsx`, `server.ts`, `supabase/functions/fetch-emails/index.ts`, `supabase/functions/manage-app/index.ts`, plus a migration to fix database access.
-- Biggest issue is not mobile UI now; it is broken runtime wiring plus backend security exposure.
-- I can already see the ZIP contains the same key files, so in implementation mode I should transplant from those exact files first, then harden the weak parts.
+- Likely files: `src/App.tsx`, `server.ts`, `supabase/functions/fetch-emails/index.ts`, `supabase/functions/manage-app/index.ts`, plus DB migration for access tightening.
+- Most important point: backend logs already show emails being collected, so next fix “more IMAP tuning” nahi hai; next fix exact ZIP request flow transplant + frontend/backend wiring cleanup hai.
