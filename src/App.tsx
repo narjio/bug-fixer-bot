@@ -448,7 +448,7 @@ function AdminAuthPage() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user || user.role !== "admin") { navigate("/admin-login"); return; }
+    if (!user || user.role !== "admin") { navigate("/admin"); return; }
 
     if (step === 1 && !otpRequested.current) {
       otpRequested.current = true;
