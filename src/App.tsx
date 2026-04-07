@@ -509,10 +509,10 @@ function AdminAuthPage() {
   const verifyTotp = async () => {
     setLoading(true);
     try {
-      const otplib = await import("otplib");
+      const { verify } = await import("otplib");
       const secret = user.totpSecret || secretKey;
-      const isValid = otplib.authenticator.check(totp, secret);
-      if (isValid) {
+      const result = await verify({ secret, token: totp });
+      if (result && (result as any).delta !== undefined) {
         localStorage.setItem("admin_auth", "true");
         navigate("/admin");
       } else {
