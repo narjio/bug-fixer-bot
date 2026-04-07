@@ -340,12 +340,12 @@ function AdminLoginPage() {
         body: JSON.stringify({ username, password })
       });
       
+      const data = await safeJson(res);
       if (!res.ok) {
-        const data = await safeJson(res);
         throw new Error(data.error || "Invalid admin credentials");
       }
       
-      const { user: userData } = await safeJson(res);
+      const userData = data.user;
       
       await fetch("/api/auth/notify", {
         method: "POST",
