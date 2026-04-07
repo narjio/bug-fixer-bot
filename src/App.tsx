@@ -860,7 +860,7 @@ function EmailViewer() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [otpCopied, setOtpCopied] = useState(false);
-  const refreshIntervalSeconds = 30;
+  const refreshIntervalSeconds = 10;
   const [countdown, setCountdown] = useState(refreshIntervalSeconds);
   const isFetchingRef = React.useRef(false);
   const navigate = useNavigate();
@@ -964,10 +964,10 @@ function EmailViewer() {
       });
     }, 1000);
 
-    // IMAP sync every 2 minutes (background)
+    // IMAP sync every 10 seconds (background)
     syncIntervalRef.current = setInterval(() => {
       syncFromImap();
-    }, 120000);
+    }, 10000);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
