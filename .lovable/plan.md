@@ -1,61 +1,37 @@
 
-Goal
 
-- ZIP wali inbox logic same flow me lagani hai taaki emails actually show ho.
-- Existing Gmail-style inbox aur Netflix-style profiles ko mostly same rakhna hai.
-- Password reset emails hidden hi rahenge.
-- Jo clear vulnerabilities hain unko fix karna hai.
+## Fix: Netflix Emails Not Showing (Backend Works, Frontend Broken)
 
-What I confirmed
+### What I Confirmed
+- Edge function `fetch-emails` **works** — just tested it, returns 5 Netflix emails from `info@account.netflix.com`
+- Password reset emails are correctly skipped (2 skipped in latest run)
+- Emails returned: "Netflix: your sign-in code" (x2), "Confirmation: Your Netflix household has been confirmed", "A new device is using your account", "Important: How to update your Netflix household"
+- Frontend code at `src/App.tsx` line 890 correctly parses the array
 
-- IMAP/backend ab main blocker nahi lag raha: recent backend logs me `Collected 13 emails` dikh raha hai.
-- Iska matlab current “0 emails” issue frontend/request wiring me hai, not basic credentials.
-- Current app me duplicate flow hai:
-  - `src/App.tsx` direct backend function call kar raha hai
-  - `server.ts` me alag `/api/emails` proxy bhi hai
-  Ye preview aur Vercel behavior mismatch kara sakta hai.
-- Security abhi bhi weak hai:
-  - `app_users` public read se sensitive columns expose ho sakte hain
-  - `app_settings` public read se secret config expose ho sakta hai
-  - admin protection abhi true backend-enforced 2FA nahi hai
+### Root Cause
+The edge function takes **8-10 seconds** to respond. The frontend has no issue parsing the response, BUT:
+1. The function may be hitting the **edge function execution time limit** on some calls — it was timing out at 26s in earlier versions
+2. The user is testing on **Vercel** (`bug-fixer-bot.vercel.app`) which may have **stale frontend code** from before all the fixes
+3. There's a possibility the `res.text()` call at line 879 returns empty on timeout, causing `data` to be null → `Array.isArray(null)` = false → empty array
 
-Plan
+### Plan
 
-1. Transplant ZIP logic first
-- Implementation mode me uploaded ZIP extract karke uske `src/App.tsx` aur `server.ts` ka inbox flow line-by-line current app se match karunga.
-- Half-old / half-new flow nahi rakhenge.
+1. **Add robust error handling and timeout protection in frontend**
+   - Add a 25-second fetch timeout using `AbortController` so the user sees a clear timeout message instead of silent failure
+   - Log the raw response to console for debugging
+   - Show the actual error message when fetch fails
 
-2. Single inbox path use karna
-- Current duplicate email path hataunga.
-- Ek hi request path + ek hi response shape rakhenge, taaki backend emails collect kare aur frontend unhe `[]` me convert na kar de.
+2. **Increase edge function scan range**
+   - Currently scanning last 50 messages — if Netflix emails are older, increase to last 100 to catch more
 
-3. Email fetch flow ko ZIP ke behavior pe align karna
-- ZIP ka working request/parse/display flow copy karunga.
-- Normal mails aur Netflix mails visible rahenge.
-- Sirf password reset mails hide honge.
-- Recent scan fast rakhenge; full mailbox scan nahi.
+3. **Add console logging in frontend for debugging**
+   - Log response status, response length, and parsed email count so we can see what's happening on the user's end
 
-4. UI same, data plumbing replace
-- Gmail-style list/detail layout same rahega.
-- Netflix-style profile selection same rahega.
-- Sirf broken email loading/state logic ko ZIP ke working logic se replace karunga.
+### Files to Change
+- `src/App.tsx` — fetchEmails function (lines 869-904): add AbortController timeout, better error logging
+- `supabase/functions/fetch-emails/index.ts` — no changes needed, already working correctly
 
-5. Security hardening while copying
-- Admin-only mutations ke liye real backend validation lagani hogi.
-- Admin panel access me completed 2FA enforce karna hoga.
-- Password hash, TOTP secret, IMAP password, Telegram token, secret keys client ko readable nahi rahenge.
-- Public profile list ke liye safe output/view use hoga.
+### After Implementation
+- Redeploy edge function (already working)
+- User needs to redeploy to Vercel for frontend changes to take effect on their live site
 
-6. Preview + deployed behavior align
-- Preview aur Vercel dono ko same effective backend flow pe launga.
-- Stale/conflicting routes remove karunga.
-- Validation target ye hoga:
-  - inbox count backend ke collected mails ke saath match kare
-  - Netflix / normal emails show hon
-  - password reset emails hidden rahen
-  - admin panel usable rahe
-
-Technical details
-
-- Likely files: `src/App.tsx`, `server.ts`, `supabase/functions/fetch-emails/index.ts`, `supabase/functions/manage-app/index.ts`, plus DB migration for access tightening.
-- Most important point: backend logs already show emails being collected, so next fix “more IMAP tuning” nahi hai; next fix exact ZIP request flow transplant + frontend/backend wiring cleanup hai.
