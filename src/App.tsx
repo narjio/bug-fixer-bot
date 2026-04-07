@@ -319,6 +319,7 @@ function AdminLoginPage() {
 
       const userData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserData;
       localStorage.setItem("user", JSON.stringify(userData));
+      await checkAuth(); // Update auth context so AdminAuthPage sees the user
 
       toast.success("Login successful. Proceeding to 2FA.");
       navigate("/admin-auth");
