@@ -646,7 +646,26 @@ function AdminPanel() {
     }
   };
 
-  const createUser = async () => {
+  const changeAdminPassword = async () => {
+    if (!currentPassword || !newAdminPassword) { toast.error("Fill both fields"); return; }
+    setChangingPassword(true);
+    try {
+      await apiCall("manage-app", {
+        action: "change_password",
+        id: currentUser?.id,
+        current_password: currentPassword,
+        new_password: newAdminPassword,
+      });
+      setCurrentPassword(""); setNewAdminPassword("");
+      toast.success("Password changed successfully!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+
     if (!newUsername || !newPassword || !newName) { toast.error("Please fill all fields"); return; }
     try {
       await apiCall("manage-app", { action: "create", username: newUsername, password: newPassword, name: newName, role: "user" });
