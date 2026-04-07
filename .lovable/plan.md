@@ -1,34 +1,35 @@
 
 
-## Plan: Scrollable Email Container + Egress Check
+## Plan: Gmail-Style Responsive Header & Layout Fix
 
-### Egress Status
-The code is correctly set up — zero Supabase egress for normal usage:
-- `loadCachedEmails()` (every 10s) → Cloudflare Worker → KV cache (FREE)
-- `syncFromImap()` (manual refresh only) → Cloudflare Worker → Supabase Edge Function (only 1 call, not per-user)
-- Direct Supabase calls only happen if Cloudflare Worker URL is missing (it's hardcoded, so never triggers)
-- **Other API calls** (login, manage-app, send-telegram-otp, send-login-notification) still hit Supabase directly, but these are infrequent (only on login/admin actions), so egress is negligible.
+### Problem
+The header looks cramped on mobile — the mail icon, username badge, refresh button, and logout are squeezed together. The overall layout doesn't feel polished like Gmail on small screens.
 
-**Verdict: Email polling causes ZERO Supabase egress. You're good.**
+### Changes to `src/App.tsx`
 
-### Scrollable Container Fix
+**1. Header redesign (Gmail-inspired, mobile-first)**
+- Make the red mail icon larger and more prominent (like Gmail's logo area)
+- Show username badge cleaner — remove the green dot animation clutter, use a simple text label
+- Refresh button: icon-only on mobile (already done), keep clean circular style
+- Logout button: smaller, subtle
+- Use proper spacing: `px-3` on mobile, `px-4` on desktop
+- Add `gap-2` between header items consistently
 
-**Problem:** Email list and content both scroll the entire page. On mobile, you scroll the whole page to see more emails.
+**2. Header structure (lines 1009-1033)**
+- Left side: Red icon (bigger on mobile: `p-2 rounded-xl`) + username pill (cleaner text sizing)
+- Right side: Refresh + Logout with consistent sizing
+- Remove `flex-shrink` hacks, use proper `min-w-0` and `truncate` only where needed
+- Username max-width: increase from `60px` to `80px` on mobile for readability
 
-**Fix:** Make the EmailViewer use a full-viewport layout with two scrollable panels:
-- Left panel (inbox list): Fixed height with `overflow-y: auto` — scrolls independently
-- Right panel (email content): Already has `overflow-auto`, just needs proper height constraint
+**3. Email content area responsiveness (lines 1107-1160)**
+- Email detail header padding: already has `p-3 sm:p-6`, keep it
+- Sender avatar and info: already responsive, keep it
+- Email body container: ensure `overflow-x-hidden` and proper word-break for HTML content
 
-### Changes to `src/App.tsx` (EmailViewer component only)
-
-1. **Outer layout**: Change `<main>` from normal flow to a flex container that fills remaining viewport height (`h-[calc(100vh-3.5rem)]` on mobile, `h-[calc(100vh-4rem)]` on desktop) with `overflow-hidden`
-
-2. **Email list section** (lines 1048-1104): Wrap the email buttons in a scrollable container with `flex-1 overflow-y-auto` so emails scroll within the panel, not the page
-
-3. **Grid columns**: Both columns get `overflow-hidden flex flex-col` so their children can scroll independently
-
-4. **Status card** stays pinned at top of left panel, email list scrolls below it
+**4. Inbox list items (lines 1077-1101)**
+- Slightly increase padding on mobile: `p-3` instead of `p-4` to save space
+- From name: increase `max-w-[60%]` to `max-w-[70%]` for better truncation
 
 ### Files to Edit
-- `src/App.tsx` — EmailViewer return JSX (lines 1007-1250), restructure layout to scrollable containers
+- `src/App.tsx` — Header section (lines 1009-1033), inbox list items styling
 
