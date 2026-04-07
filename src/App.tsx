@@ -6,6 +6,20 @@ import { db, auth } from "./firebase";
 import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { generateSecret, generateURI, verify } from "otplib";
 import { QRCodeSVG } from "qrcode.react";
+import bcrypt from "bcryptjs";
+
+// --- Rate Limiter (5 attempts per 60 seconds) ---
+const loginAttempts: { [key: string]: number[] } = {};
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const window = 60_000; // 1 minute
+  const maxAttempts = 5;
+  if (!loginAttempts[key]) loginAttempts[key] = [];
+  loginAttempts[key] = loginAttempts[key].filter(t => now - t < window);
+  if (loginAttempts[key].length >= maxAttempts) return false;
+  loginAttempts[key].push(now);
+  return true;
+}
 
 // Safe JSON parser - prevents crashes on non-JSON responses
 async function safeJson(res: Response): Promise<any> {
