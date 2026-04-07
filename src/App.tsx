@@ -1032,10 +1032,10 @@ function EmailViewer() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-2 sm:px-4 py-4 sm:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8">
-          <div className={`${selectedEmail ? "hidden lg:block" : "block"} lg:col-span-5 xl:col-span-4 space-y-6`}>
-            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-5 flex items-center gap-3 sm:gap-4">
+      <main className="max-w-6xl mx-auto px-2 sm:px-4 h-[calc(100vh-3.5rem)] sm:h-[calc(100vh-4rem)] overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8 h-full py-4 sm:py-8">
+          <div className={`${selectedEmail ? "hidden lg:block" : "block"} lg:col-span-5 xl:col-span-4 flex flex-col overflow-hidden h-full`}>
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-5 flex items-center gap-3 sm:gap-4 flex-shrink-0">
               <div className="bg-green-100 p-2 sm:p-3 rounded-xl flex-shrink-0">
                 <ShieldCheck className="text-green-600 w-6 h-6" />
               </div>
@@ -1045,7 +1045,7 @@ function EmailViewer() {
               </div>
             </section>
 
-            <section>
+            <section className="mt-4 flex-1 overflow-y-auto min-h-0 flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                   Inbox
@@ -1059,7 +1059,7 @@ function EmailViewer() {
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1 overflow-y-auto min-h-0">
                 {emails.length === 0 && !error ? (
                   <div className="bg-white border border-dashed border-slate-200 rounded-xl p-12 text-center">
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -1104,7 +1104,7 @@ function EmailViewer() {
             </section>
           </div>
 
-          <div className={`${selectedEmail ? "block" : "hidden lg:flex"} lg:col-span-7 xl:col-span-8 flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-12rem)] min-h-[400px] sm:min-h-[600px]`}>
+          <div className={`${selectedEmail ? "block" : "hidden lg:flex"} lg:col-span-7 xl:col-span-8 flex flex-col overflow-hidden h-full`}>
             {selectedEmail ? (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
                 className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
