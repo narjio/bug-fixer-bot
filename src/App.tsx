@@ -1205,42 +1205,42 @@ function EmailViewer() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-red-600 p-2 rounded-lg">
-              <Mail className="text-white w-5 h-5" />
+        <div className="max-w-6xl mx-auto px-2 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-1 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-shrink">
+            <div className="bg-red-600 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+              <Mail className="text-white w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <h1 className="font-bold text-xl tracking-tight hidden sm:block">Secure OTP Viewer</h1>
-            <div className="ml-4 flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-xs font-bold text-slate-600">{user.name}</span>
+            <h1 className="font-bold text-sm sm:text-xl tracking-tight hidden md:block">Secure OTP Viewer</h1>
+            <div className="flex items-center gap-1.5 bg-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full min-w-0">
+              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0" />
+              <span className="text-[10px] sm:text-xs font-bold text-slate-600 truncate max-w-[60px] sm:max-w-[120px]">{user.name}</span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col items-end mr-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Next Refresh</span>
-              <span className="text-sm font-mono font-bold text-red-600">{countdown}s</span>
+          <div className="flex items-center gap-1 sm:gap-3 flex-shrink-0">
+            <div className="flex flex-col items-end mr-0.5 sm:mr-2">
+              <span className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase leading-tight">Refresh</span>
+              <span className="text-xs sm:text-sm font-mono font-bold text-red-600">{countdown}s</span>
             </div>
             <button
               onClick={handleManualRefresh}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all disabled:opacity-50 active:scale-95"
+              className="flex items-center gap-1 sm:gap-2 p-2 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-xs sm:text-sm font-bold hover:bg-slate-800 transition-all disabled:opacity-50 active:scale-95"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Refresh Now</span>
+              <span className="hidden sm:inline">Refresh</span>
             </button>
-            <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-2 hover:bg-slate-100 rounded-full">
-              <LogOut className="w-5 h-5 text-slate-400" />
+            <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full">
+              <LogOut className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="max-w-6xl mx-auto px-2 sm:px-4 py-4 sm:py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8">
           <div className={`${selectedEmail ? 'hidden lg:block' : 'block'} lg:col-span-5 xl:col-span-4 space-y-6`}>
-            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex items-center gap-4">
-              <div className="bg-green-100 p-3 rounded-xl">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-5 flex items-center gap-3 sm:gap-4">
+              <div className="bg-green-100 p-2 sm:p-3 rounded-xl flex-shrink-0">
                 <ShieldCheck className="text-green-600 w-6 h-6" />
               </div>
               <div>
@@ -1274,7 +1274,7 @@ function EmailViewer() {
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
                       <Clock className="text-slate-200 w-6 h-6" />
                     </div>
-                    <p className="text-xs text-slate-400 font-medium">Waiting for OTP emails...</p>
+                    <p className="text-[10px] sm:text-xs text-slate-400 font-medium">Waiting for OTP emails...</p>
                   </div>
                 ) : (
                   emails.map((email) => (
@@ -1317,62 +1317,62 @@ function EmailViewer() {
             </section>
           </div>
 
-          <div className={`${selectedEmail ? 'block' : 'hidden lg:flex'} lg:col-span-7 xl:col-span-8 flex-col h-[calc(100vh-12rem)] min-h-[600px]`}>
+          <div className={`${selectedEmail ? 'block' : 'hidden lg:flex'} lg:col-span-7 xl:col-span-8 flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-12rem)] min-h-[400px] sm:min-h-[600px]`}>
             {selectedEmail ? (
               <motion.div 
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden"
               >
-                <div className="p-6 border-b border-slate-100 bg-white sticky top-0 z-10">
-                  <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 sm:p-6 border-b border-slate-100 bg-white sticky top-0 z-10">
+                  <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-6">
                     <button 
                       onClick={() => setSelectedEmail(null)}
-                      className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors font-bold text-sm active:scale-95"
+                      className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors font-bold text-xs sm:text-sm active:scale-95"
                     >
                       <ArrowLeft className="w-4 h-4" />
-                      Back to Inbox
+                      <span className="hidden xs:inline">Back to </span>Inbox
                     </button>
                   </div>
 
-                  <h2 className="text-2xl font-bold text-slate-900 mb-4 leading-tight">
+                  <h2 className="text-base sm:text-2xl font-bold text-slate-900 mb-2 sm:mb-4 leading-tight">
                     {selectedEmail.subject}
                   </h2>
                   
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold text-lg">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold text-sm sm:text-lg flex-shrink-0">
                         N
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-slate-900">System Support</span>
-                          <span className="text-xs text-slate-400">Verified Sender</span>
+                          <span className="font-bold text-xs sm:text-sm text-slate-900 truncate">System Support</span>
+                          <span className="text-[10px] sm:text-xs text-slate-400 hidden sm:inline">Verified Sender</span>
                         </div>
-                        <p className="text-xs text-slate-500 italic">Recipient: Protected Account</p>
+                        <p className="text-[10px] sm:text-xs text-slate-500 italic truncate">Recipient: Protected Account</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-400">
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-[10px] sm:text-xs text-slate-400">
                         {new Date(selectedEmail.date).toLocaleString()}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-auto p-6 bg-white">
+                <div className="flex-1 overflow-auto p-3 sm:p-6 bg-white">
                   {selectedEmail.otp && (
-                    <div className="mb-8 bg-slate-900 rounded-2xl p-6 text-center shadow-xl shadow-slate-200 relative overflow-hidden">
+                    <div className="mb-4 sm:mb-8 bg-slate-900 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-center shadow-xl shadow-slate-200 relative overflow-hidden">
                       <div className="relative z-10">
-                        <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] mb-2">
+                        <p className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] mb-1 sm:mb-2">
                           Detected OTP Code
                         </p>
-                        <div className="text-5xl font-mono font-black text-white tracking-widest mb-4">
+                        <div className="text-3xl sm:text-5xl font-mono font-black text-white tracking-wider sm:tracking-widest mb-2 sm:mb-4">
                           {selectedEmail.otp}
                         </div>
                         <button
                           onClick={() => copyOtp(selectedEmail.otp!)}
-                          className="flex items-center gap-2 mx-auto px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold transition-all transform active:scale-95"
+                          className="flex items-center gap-1.5 mx-auto px-4 py-1.5 sm:px-6 sm:py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold text-xs sm:text-sm transition-all transform active:scale-95"
                         >
                           {otpCopied ? (
                             <>
@@ -1387,8 +1387,8 @@ function EmailViewer() {
                           )}
                         </button>
                       </div>
-                      <div className="absolute top-0 right-0 p-4 opacity-10">
-                        <ShieldCheck className="w-24 h-24 text-white" />
+                      <div className="absolute top-0 right-0 p-2 sm:p-4 opacity-10">
+                        <ShieldCheck className="w-16 h-16 sm:w-24 sm:h-24 text-white" />
                       </div>
                     </div>
                   )}
@@ -1402,12 +1402,12 @@ function EmailViewer() {
                 </div>
               </motion.div>
             ) : (
-              <div className="bg-white rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center h-full text-center p-12">
-                <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mb-6">
-                  <Mail className="text-slate-200 w-10 h-10" />
+              <div className="bg-white rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center h-full text-center p-6 sm:p-12">
+                <div className="bg-slate-50 w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center mb-4 sm:mb-6">
+                  <Mail className="text-slate-200 w-8 h-8 sm:w-10 sm:h-10" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">Select an email to read</h3>
-                <p className="text-slate-400 max-w-xs mx-auto">
+                <h3 className="text-base sm:text-xl font-bold text-slate-800 mb-2">Select an email to read</h3>
+                <p className="text-sm sm:text-base text-slate-400 max-w-xs mx-auto">
                   Click on any email from the inbox list to view its full content and details.
                 </p>
               </div>
