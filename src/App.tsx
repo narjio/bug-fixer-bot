@@ -982,12 +982,23 @@ function EmailViewer() {
               )}
 
               <div className="space-y-2">
-                {emails.length === 0 && !loading && !error ? (
+                {emails.length === 0 && !error ? (
                   <div className="bg-white border border-dashed border-slate-200 rounded-xl p-12 text-center">
                     <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <Clock className="text-slate-200 w-6 h-6" />
+                      {loading ? (
+                        <RefreshCw className="text-red-400 w-6 h-6 animate-spin" />
+                      ) : (
+                        <Clock className="text-slate-200 w-6 h-6" />
+                      )}
                     </div>
-                    <p className="text-[10px] sm:text-xs text-slate-400 font-medium">Waiting for emails...</p>
+                    <p className="text-[10px] sm:text-xs text-slate-400 font-medium">
+                      {loading ? "Fetching emails from server... (this may take 15-20 seconds)" : "Waiting for emails..."}
+                    </p>
+                    {loading && (
+                      <div className="mt-3 w-32 h-1 bg-slate-100 rounded-full mx-auto overflow-hidden">
+                        <div className="h-full bg-red-500 rounded-full animate-pulse" style={{width: '60%'}} />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   emails.map(email => (
