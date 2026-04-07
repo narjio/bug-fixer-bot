@@ -118,6 +118,43 @@ const PROFILE_COLORS = [
   "bg-orange-500", "bg-pink-500", "bg-teal-500", "bg-indigo-500",
 ];
 
+// ==================== CAPTCHA MODAL (shared) ====================
+function CaptchaModal({ siteKey, onVerify, onCancel }: { siteKey: string; onVerify: (token: string) => void; onCancel: () => void }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+        className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+        <div className="p-6 pb-4">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="bg-blue-600 p-2 rounded-xl">
+              <ShieldCheck className="text-white w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-black text-slate-900 text-lg">Security Check</h3>
+              <p className="text-slate-500 text-xs">Verify you're human</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-center px-6 pb-4">
+          <ReCAPTCHA sitekey={siteKey} onChange={(token) => { if (token) onVerify(token); }} />
+        </div>
+        <div className="flex border-t border-slate-100">
+          <button onClick={onCancel}
+            className="flex-1 py-4 text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+          <div className="w-px bg-slate-100" />
+          <button onClick={onCancel}
+            className="flex-1 py-4 text-sm font-bold text-red-600 hover:bg-red-50 transition-colors">
+            Login
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ==================== NETFLIX-STYLE PROFILE LOGIN ====================
 function ProfileSelectPage() {
   const [profiles, setProfiles] = useState<UserData[]>([]);
