@@ -1119,9 +1119,7 @@ function EmailViewer() {
     try {
       const response = await fetch("/api/emails", {
         credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
+        headers: { Accept: "application/json" },
       });
       const raw = await response.text();
       let data: any = null;
