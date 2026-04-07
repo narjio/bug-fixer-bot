@@ -7,6 +7,17 @@ import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc
 import { generateSecret, generateURI, verify } from "otplib";
 import { QRCodeSVG } from "qrcode.react";
 
+// Safe JSON parser - prevents crashes on non-JSON responses
+async function safeJson(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error("Invalid JSON response:", text);
+    throw new Error("Something went wrong. Please try again.");
+  }
+}
+
 // Auth Context
 const AuthContext = createContext<{ user: any, loading: boolean, checkAuth: () => Promise<void> } | null>(null);
 
