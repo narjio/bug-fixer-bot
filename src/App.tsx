@@ -1530,6 +1530,10 @@ function EmailViewer() {
   const [syncing, setSyncing] = useState(false);
   const [resolvedWorkerUrl, setResolvedWorkerUrl] = useState<string | null>(null);
   const workerUrlLoaded = React.useRef(false);
+  const lastSyncTime = React.useRef(0);
+  const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 min between auto syncs
+  const [hiddenCount, setHiddenCount] = useState(0);
+  const [stale, setStale] = useState(false);
 
   const backToAdmin = () => {
     try {
@@ -1560,7 +1564,6 @@ function EmailViewer() {
           }
         }
       } catch {}
-      // Fallback to env var
       setResolvedWorkerUrl(getCloudflareWorkerUrl());
     })();
   }, []);
@@ -1569,32 +1572,57 @@ function EmailViewer() {
     return resolvedWorkerUrl;
   }, [resolvedWorkerUrl]);
 
-  const loadCachedEmails = async () => {
-    try {
-      const cfUrl = getWorkerUrl();
-      const token = getSessionToken();
-      let res: Response;
-      if (cfUrl) {
+  // Fetch with worker fallback: if worker returns 404/405/502, retry direct backend
+  const fetchWithFallback = async (path: string, method: string, body?: any): Promise<Response> => {
+    const cfUrl = getWorkerUrl();
+    const token = getSessionToken();
+
+    if (cfUrl) {
+      try {
         const headers: Record<string, string> = {};
         if (token) headers["X-Session-Token"] = token;
-        res = await fetch(`${cfUrl}/api/emails`, { headers });
-      } else {
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${getApiKey()}`,
-          "apikey": getApiKey(),
-        };
-        if (token) headers["X-Session-Token"] = token;
-        res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-          method: "POST", headers, body: JSON.stringify({ mode: "cache" }),
-        });
+        const res = await fetch(`${cfUrl}${path}`, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+        // If worker is misconfigured (404/405/502), fall back to direct backend
+        if (res.status === 404 || res.status === 405 || res.status === 502) {
+          console.warn(`[fallback] Worker returned ${res.status}, trying direct backend`);
+          return fetchDirect(method, body);
+        }
+        return res;
+      } catch (err) {
+        console.warn("[fallback] Worker unreachable, trying direct backend:", err);
+        return fetchDirect(method, body);
       }
+    }
+    return fetchDirect(method, body);
+  };
+
+  const fetchDirect = async (method: string, body?: any): Promise<Response> => {
+    const token = getSessionToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+      "apikey": getApiKey(),
+    };
+    if (token) headers["X-Session-Token"] = token;
+    const mode = body?.mode || "cache";
+    return fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+      method: "POST", headers, body: JSON.stringify({ mode, ...body }),
+    });
+  };
+
+  const loadCachedEmails = async () => {
+    try {
+      const res = await fetchWithFallback("/api/emails", "GET");
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
 
       if (!res.ok) {
         const errMsg = data?.error || `Failed to load emails (${res.status})`;
+        // Keep old emails visible but mark as stale
+        if (emails.length > 0) {
+          setStale(true);
+        }
         setError(errMsg);
         return 0;
       }
@@ -1603,14 +1631,43 @@ function EmailViewer() {
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
       setError(null);
+      setStale(false);
       setLastUpdated(new Date());
       return emailList.length;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load emails";
+      if (emails.length > 0) setStale(true);
       setError(msg);
       console.error("[loadCached] Error:", err);
       return 0;
     }
+  };
+
+  // Load hidden email count to show filter banner
+  const loadHiddenCount = async () => {
+    try {
+      // Fetch unfiltered count directly from backend
+      const token = getSessionToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getApiKey()}`,
+        "apikey": getApiKey(),
+      };
+      if (token) headers["X-Session-Token"] = token;
+      // We'll compute hidden count by comparing: total cached vs displayed
+      // Since we can't easily get unfiltered from worker, just check settings
+      const filterData = await apiCall("manage-app", { action: "get_settings", key: "email_filters" });
+      const filtersActive = filterData?.value?.showSignInCodes === false || filterData?.value?.showPasswordResets !== true;
+      if (!filtersActive) { setHiddenCount(0); return; }
+
+      // Get total email count from DB
+      const res = await fetchDirect("POST", { mode: "cache" });
+      if (res.ok) {
+        // This is filtered server-side. To get unfiltered we'd need a special mode.
+        // For now just show a generic "filters active" banner based on settings
+        setHiddenCount(-1); // -1 = filters active but count unknown
+      }
+    } catch { }
   };
 
   const syncFromImap = async () => {
@@ -1618,18 +1675,27 @@ function EmailViewer() {
     isFetchingRef.current = true;
     setSyncing(true);
     try {
-      const cfUrl = getWorkerUrl();
-      const token = getSessionToken();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 50000);
 
+      const cfUrl = getWorkerUrl();
+      const token = getSessionToken();
       let syncRes: Response;
+
       if (cfUrl) {
-        const headers: Record<string, string> = {};
-        if (token) headers["X-Session-Token"] = token;
-        syncRes = await fetch(`${cfUrl}/api/emails/sync`, {
-          method: "POST", signal: controller.signal, headers,
-        });
+        try {
+          const headers: Record<string, string> = {};
+          if (token) headers["X-Session-Token"] = token;
+          syncRes = await fetch(`${cfUrl}/api/emails/sync`, {
+            method: "POST", signal: controller.signal, headers,
+          });
+          if (syncRes.status === 404 || syncRes.status === 405 || syncRes.status === 502) {
+            console.warn(`[sync fallback] Worker returned ${syncRes.status}`);
+            syncRes = await fetchDirect("POST", { mode: "sync" });
+          }
+        } catch {
+          syncRes = await fetchDirect("POST", { mode: "sync" });
+        }
       } else {
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -1649,17 +1715,22 @@ function EmailViewer() {
 
       if (!syncRes.ok) {
         const errMsg = data?.error || `Sync failed (${syncRes.status})`;
+        // Don't clear existing emails on sync error
+        if (emails.length > 0) setStale(true);
         setError(errMsg);
       } else {
         setError(null);
+        setStale(false);
       }
 
+      lastSyncTime.current = Date.now();
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         console.log("[syncIMAP] Timeout - will retry next cycle");
       } else {
         const msg = err instanceof Error ? err.message : "Sync failed";
+        if (emails.length > 0) setStale(true);
         setError(msg);
         console.error("[syncIMAP] Error:", err);
       }
@@ -1670,9 +1741,10 @@ function EmailViewer() {
   };
 
   const fetchEmails = async () => {
-    setError(null);
+    // Immediate cache reload for fast feedback
     await loadCachedEmails();
     setCountdown(refreshIntervalSeconds);
+    // Background sync (non-blocking)
     syncFromImap();
   };
 
@@ -1682,11 +1754,16 @@ function EmailViewer() {
       setLoading(false);
       syncFromImap();
     });
+    loadHiddenCount();
 
     const cacheInterval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           loadCachedEmails();
+          // Auto background sync if enough time passed
+          if (Date.now() - lastSyncTime.current > SYNC_THROTTLE_MS) {
+            syncFromImap();
+          }
           return refreshIntervalSeconds;
         }
         return prev - 1;
@@ -1696,6 +1773,9 @@ function EmailViewer() {
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         loadCachedEmails();
+        if (Date.now() - lastSyncTime.current > SYNC_THROTTLE_MS) {
+          syncFromImap();
+        }
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
