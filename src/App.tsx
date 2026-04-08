@@ -700,7 +700,12 @@ function AdminPanel() {
       } catch {}
 
       try {
-        const cfUrl = getCloudflareWorkerUrl();
+        // Use dynamic worker URL from email accounts if available
+        let cfUrl = getCloudflareWorkerUrl();
+        if (emailAccounts.length > 0) {
+          const accWithUrl = emailAccounts.find(a => a.cloudflareUrl && a.cloudflareUrl.trim());
+          if (accWithUrl) cfUrl = accWithUrl.cloudflareUrl.trim().replace(/\/+$/, "");
+        }
         const token = getSessionToken();
         let res: Response;
         if (cfUrl) {
@@ -714,8 +719,10 @@ function AdminPanel() {
             body: JSON.stringify({ mode: "cache" }),
           });
         }
-        const data = await res.json();
-        if (Array.isArray(data)) setStats(prev => ({ ...prev, totalEmails: data.length }));
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) setStats(prev => ({ ...prev, totalEmails: data.length }));
+        }
       } catch {}
     })();
   }, []);
