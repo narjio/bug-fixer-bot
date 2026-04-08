@@ -287,6 +287,65 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "request_admin_otp") {
+      const { user_id } = params;
+      if (!user_id) throw new Error("user_id required");
+
+      // Generate OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Save OTP to DB
+      await supabase.from("app_otps").delete().eq("user_id", user_id);
+      const { error: otpErr } = await supabase.from("app_otps").insert({ user_id, otp: otpCode });
+      if (otpErr) throw otpErr;
+
+      // Get Telegram config
+      let tgConfig: { botToken: string; chatId: string } | null = null;
+      try {
+        const { data: settingsData } = await supabase
+          .from("app_settings")
+          .select("value")
+          .eq("key", "config")
+          .single();
+        if (settingsData?.value) {
+          const cfg = settingsData.value as any;
+          if (cfg.TELEGRAM_BOT_TOKEN && cfg.TELEGRAM_CHAT_ID) {
+            tgConfig = { botToken: cfg.TELEGRAM_BOT_TOKEN, chatId: cfg.TELEGRAM_CHAT_ID };
+          }
+        }
+      } catch {}
+      if (!tgConfig) {
+        const bt = Deno.env.get("TELEGRAM_BOT_TOKEN");
+        const ci = Deno.env.get("TELEGRAM_CHAT_ID");
+        if (bt && ci) tgConfig = { botToken: bt, chatId: ci };
+      }
+
+      if (!tgConfig) {
+        throw new Error("Telegram not configured. Set bot token and chat ID in admin settings.");
+      }
+
+      // Send OTP via Telegram
+      const telegramRes = await fetch(`https://api.telegram.org/bot${tgConfig.botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: tgConfig.chatId,
+          text: `🛡 Admin 3FA OTP: <code>${otpCode}</code>\nValid for 5 minutes.`,
+          parse_mode: "HTML",
+        }),
+      });
+
+      if (!telegramRes.ok) {
+        const errText = await telegramRes.text();
+        console.error("Telegram API error:", errText);
+        throw new Error("Failed to send OTP via Telegram. Check bot token and chat ID.");
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "verify_otp") {
       const { user_id, otp } = params;
       const { data, error } = await supabase
