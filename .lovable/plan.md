@@ -1,75 +1,149 @@
 
 
-## Plan: Admin Panel Enhancements & Email Filter Controls
+## Plan: Security Hardening + Admin Panel Features
 
-### What You Asked For
-1. **Sign-in code filter toggle** — Admin can toggle whether "sign in code" emails are shown or hidden in the inbox
-2. **Server config pre-fill not working** — Fix the config fields not loading saved values
-3. **Admin "Visit User" (Eye icon) should go directly into user account** — Currently it does via `loginAsUser`, but need to verify it navigates properly
-4. **Admin change user password** — Already exists, confirm working
-5. **Add multiple email accounts** — Support more than one IMAP account
-6. **Admin panel UI improvements** — Better layout, polish, organization
+### Architecture Overview
 
----
+The system currently has these vulnerabilities:
+1. Frontend localStorage controls all access (role, assigned accounts)
+2. Cloudflare Worker endpoints are publicly accessible with no auth
+3. `manage-app` edge function accepts any action without verifying caller identity
+4. IMAP credentials stored as plain JSON in `app_settings`
 
 ### Changes
 
-#### 1. Email Filter Toggle in Admin Panel (new setting)
-**File: `src/App.tsx` — AdminPanel**
-- Add a new toggle: **"Show Sign-In Code Emails"** (on/off)
-- Stores in `app_settings` with key `email_filters` → `{ showSignInCodes: true/false }`
-- When OFF, the `EmailViewer` fetches this setting and filters out emails with subjects containing "Enter this code to sign in" or similar sign-in code keywords
-- Also update `fetch-emails/index.ts` to optionally filter sign-in code emails at the server level (like password reset filtering)
+---
+
+#### 1. Server-Side Session Tokens (Core Security Fix)
+
+**New edge function: `supabase/functions/session/index.ts`**
+- On successful login, `manage-app` generates a signed session token (HMAC-SHA256 using `SUPABASE_SERVICE_ROLE_KEY` as secret)
+- Token contains: `{ userId, role, assignedAccounts, exp }` (30-minute expiry)
+- Frontend stores token in localStorage alongside user data
+- All subsequent API calls include `X-Session-Token` header
+
+**File: `supabase/functions/manage-app/index.ts`**
+- Login action returns a signed session token
+- All admin-only actions (`create`, `delete`, `change_password`, `set_settings`, `list`) verify session token and check `role === "admin"`
+- User actions (`change_password` for self) verify token matches user ID
+- New helper: `verifySessionToken(token, secret)` — validates HMAC signature and expiry
+
+**File: `src/App.tsx`**
+- `apiCall()` automatically attaches `X-Session-Token` header from localStorage
+- Remove all frontend trust: role checks, assigned_accounts from localStorage are only for UI display
+- All access decisions made server-side
+
+---
+
+#### 2. Secure Cloudflare Worker Authentication
+
+**File: `cloudflare-worker/worker.js`**
+- Require `Authorization: Bearer <session_token>` on all endpoints
+- Worker validates token signature using a shared secret (new env var: `SESSION_SECRET`)
+- Extract `assignedAccounts` from token, pass to Supabase fetch-emails as filter
+- Reject requests without valid token (401)
+- Add rate limiting: max 30 requests/minute per IP using KV counter
+- Add request timestamp validation (reject requests older than 60 seconds)
+
+**New Cloudflare Worker env var needed: `SESSION_SECRET`** (same value as used in edge function)
+
+---
+
+#### 3. Per-User IMAP Account Assignment (Server-Enforced)
+
+**Database migration:** Add `assigned_accounts` (jsonb, nullable) to `app_users`
+
+**File: `supabase/functions/manage-app/index.ts`**
+- `create` action accepts `assigned_accounts` array
+- `list` action returns `assigned_accounts` for each user
+- New `update_user` action to edit assignments
+- Login response includes `assignedAccounts` in session token (server-enforced)
 
 **File: `supabase/functions/fetch-emails/index.ts`**
-- Add `SIGN_IN_CODE_SUBJECTS` filter array (e.g., "enter this code", "sign in code", "sign-in activity")
-- Read `email_filters` setting from `app_settings`
-- If `showSignInCodes` is false, skip those emails during IMAP sync (same pattern as password reset filtering)
+- Cache mode: accept `account_labels` parameter, filter by `account_label` column
+- Ignore any client-provided filters — extract from session token instead
+- Validate session token in fetch-emails as well
 
-#### 2. Fix Server Config Pre-fill
-**File: `src/App.tsx` — AdminPanel useEffect**
-- The config fetch looks correct (`get_settings` with key `config`), but the DB currently has no `config` key saved
-- The issue: config values are only saved when admin clicks "Save Server Configuration" — if they were set via environment variables originally, they won't appear in the UI
-- Fix: ensure the initial load properly populates fields; add a check that if `config.value` has the keys, spread them properly
+**File: `src/App.tsx` — Admin Panel, Users tab**
+- Create User form: multi-select checkboxes for available IMAP accounts
+- User list: show assigned accounts per user, allow editing
+- Email Accounts tab: add `cloudflareUrl` field per account
 
-#### 3. Admin Visit User — Direct Account Access
-**File: `src/App.tsx` — `loginAsUser` function (line 700-705)**
-- Already implemented and navigates to `/viewer`
-- Verify it works correctly; the Eye icon click should set localStorage and redirect
+**File: `src/App.tsx` — EmailViewer**
+- Fetch from per-account Cloudflare Worker URLs based on user's assigned accounts
+- Merge results from multiple workers
 
-#### 4. Multiple Email Accounts Support
-**File: `src/App.tsx` — AdminPanel**
-- Convert the single IMAP config into an **email accounts list** stored in `app_settings` key `email_accounts`
-- Admin can add/remove multiple IMAP accounts (each with host, port, user, password, label)
-- UI: "Email Accounts" section with add/remove buttons, each account as a card
+---
+
+#### 4. Fix Admin "Login as User"
+
+**File: `src/App.tsx`**
+- `loginAsUser()`: backup admin session to `admin_backup` in localStorage, set user with role "user"
+- `ProtectedRoute`: when role is "user" and `admin_backup` exists, allow access (admin impersonation)
+- EmailViewer header: show "Back to Admin" button when `admin_backup` exists
+- Clicking "Back to Admin" restores admin session and navigates to `/admin/dashboard`
+
+**File: `supabase/functions/manage-app/index.ts`**
+- New action: `impersonate` — admin provides their session token + target user ID
+- Returns a new session token with target user's data but flagged as `impersonated: true`
+- Logged as audit event
+
+---
+
+#### 5. Password Reset Email Toggle
+
+**File: `src/App.tsx` — Security tab**
+- Add toggle: "Show Password Reset Emails" (default: OFF, current behavior)
+- Stored in `email_filters`: `{ showSignInCodes: bool, showPasswordResets: bool }`
 
 **File: `supabase/functions/fetch-emails/index.ts`**
-- Read `email_accounts` array from `app_settings` instead of single config
-- Loop through each account, connect to IMAP, fetch emails from all accounts
-- Tag cached emails with `account_label` or `account_id` for identification
+- Read `showPasswordResets` from settings
+- When toggle is ON, allow password reset emails through (currently always filtered)
 
-**Database migration:**
-- Add `account_label` column to `cached_emails` table (nullable, default null for backward compatibility)
+---
 
-#### 5. Admin Panel UI Enhancements
-**File: `src/App.tsx` — AdminPanel**
-- Add tab-based navigation: **Users | Security | Email Accounts | Settings**
-- Better card styling with icons and descriptions
-- Status indicators (green dot for active IMAP connections)
-- User list: show last login time, add search/filter
-- Move "Change Admin Password" into a dropdown/profile menu in header
-- Add dashboard stats at top: total users, active emails, last sync time
+#### 6. IMAP Credential Encryption
+
+**File: `supabase/functions/manage-app/index.ts`**
+- When saving email accounts (`set_settings` key `email_accounts`), encrypt passwords using AES-256-GCM with `SUPABASE_SERVICE_ROLE_KEY` derived key
+- When reading, decrypt only server-side
+- Frontend never receives raw IMAP passwords (show masked `••••••••`)
+
+**File: `supabase/functions/fetch-emails/index.ts`**
+- Decrypt IMAP passwords before connecting
+
+---
+
+#### 7. Audit Logging
+
+**Database migration:** Create `audit_logs` table:
+- `id` (uuid), `action` (text), `actor_id` (uuid), `target_id` (uuid nullable), `details` (jsonb), `ip` (text), `created_at` (timestamptz)
+
+**File: `supabase/functions/manage-app/index.ts`**
+- Log: user creation, deletion, password changes, settings changes, impersonation, login attempts
+
+---
+
+#### 8. Settings Pre-fill Fix
+
+**File: `src/App.tsx`**
+- Config fetch already works — add fallback hint text "No saved config yet — save once to persist"
+- Ensure `config.value` properly spreads into `serverConfig` state
 
 ---
 
 ### Files to Edit
-1. `src/App.tsx` — Admin panel redesign (tabs, email filter toggle, multi-account UI, enhancements)
-2. `supabase/functions/fetch-emails/index.ts` — Sign-in code filtering, multi-account IMAP support
-3. **Database migration** — Add `account_label` column to `cached_emails`
+1. `src/App.tsx` — Session token in API calls, per-user assignment UI, login-as-user fix, password reset toggle, CF URL per account
+2. `supabase/functions/manage-app/index.ts` — Session tokens, admin verification, assigned_accounts CRUD, IMAP encryption, audit logging, impersonation
+3. `supabase/functions/fetch-emails/index.ts` — Session validation, account-label filtering, toggleable password reset, IMAP password decryption
+4. `cloudflare-worker/worker.js` — Token validation, rate limiting, per-user account filtering
+5. **Database migrations** — `assigned_accounts` on `app_users`, `audit_logs` table
 
-### Technical Notes
-- Email filter setting uses existing `app_settings` table (key: `email_filters`)
-- Multi-account stored as JSON array in `app_settings` (key: `email_accounts`)
-- Backward compatible: if no `email_accounts` key exists, falls back to single `config` key
-- Sign-in code filter keywords: "enter this code", "sign-in code", "sign in to", "sign-in activity"
+### Security Outcome
+- Zero frontend trust — all access verified server-side via signed session tokens
+- Cloudflare Workers reject unauthenticated requests
+- IMAP credentials encrypted at rest
+- Admin impersonation tracked via audit logs
+- Rate limiting at Worker level prevents abuse
+- Replay attacks prevented via token expiry + timestamp validation
 
