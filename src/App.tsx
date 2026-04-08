@@ -758,8 +758,8 @@ function AdminPanel() {
     try {
       await apiCall("manage-app", { action: "set_settings", key: "email_filters", value: { showSignInCodes, showPasswordResets: newVal } });
       toast.success(newVal ? "Password reset emails will be shown" : "Password reset emails will be hidden");
-    } catch {
-      toast.error("Failed to save filter setting");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save filter setting");
       setShowPasswordResets(!newVal);
     }
   };
