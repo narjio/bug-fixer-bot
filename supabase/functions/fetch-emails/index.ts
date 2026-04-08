@@ -277,14 +277,33 @@ Deno.serve(async (req) => {
     }
 
     const allEmails: any[] = [];
+    const accountErrors: Array<{ label: string; error: string }> = [];
+
     for (const acc of accounts) {
       try {
         console.log(`Fetching from account: ${acc.label} (${acc.user})`);
         const emails = await fetchFromAccount(supabase, acc.host, acc.port, acc.user, acc.password, acc.label, cachedIds, filterSignInCodes, filterPasswordResets);
         allEmails.push(...emails);
       } catch (err) {
-        console.error(`Error fetching from ${acc.label}:`, err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`Error fetching from ${acc.label}:`, errMsg);
+        const isAuthError = /auth|login|invalid credentials|authenticationfailed/i.test(errMsg);
+        accountErrors.push({
+          label: acc.label,
+          error: isAuthError
+            ? `IMAP login failed for "${acc.label}". Check email and app password.`
+            : `Failed to connect to "${acc.label}": ${errMsg}`,
+        });
       }
+    }
+
+    // If ALL accounts failed, return an error instead of faking success
+    if (accountErrors.length > 0 && accountErrors.length === accounts.length) {
+      const combinedMsg = accountErrors.map(e => e.error).join(" | ");
+      return new Response(
+        JSON.stringify({ success: false, error: combinedMsg }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     allEmails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -298,6 +317,17 @@ Deno.serve(async (req) => {
 
       const { error: upsertErr } = await supabase.from("cached_emails").upsert(rows, { onConflict: "id" });
       if (upsertErr) console.error("Cache upsert error:", upsertErr);
+    }
+
+    // Return emails with partial warnings if some accounts failed
+    const response: any = allEmails;
+    if (accountErrors.length > 0) {
+      return new Response(JSON.stringify({
+        emails: allEmails,
+        warnings: accountErrors.map(e => e.error),
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     return new Response(JSON.stringify(allEmails), {
