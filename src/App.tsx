@@ -700,7 +700,12 @@ function AdminPanel() {
       } catch {}
 
       try {
-        const cfUrl = getCloudflareWorkerUrl();
+        // Use dynamic worker URL from email accounts if available
+        let cfUrl = getCloudflareWorkerUrl();
+        if (emailAccounts.length > 0) {
+          const accWithUrl = emailAccounts.find(a => a.cloudflareUrl && a.cloudflareUrl.trim());
+          if (accWithUrl) cfUrl = accWithUrl.cloudflareUrl.trim().replace(/\/+$/, "");
+        }
         const token = getSessionToken();
         let res: Response;
         if (cfUrl) {
@@ -714,8 +719,10 @@ function AdminPanel() {
             body: JSON.stringify({ mode: "cache" }),
           });
         }
-        const data = await res.json();
-        if (Array.isArray(data)) setStats(prev => ({ ...prev, totalEmails: data.length }));
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) setStats(prev => ({ ...prev, totalEmails: data.length }));
+        }
       } catch {}
     })();
   }, []);
@@ -1511,6 +1518,8 @@ function EmailViewer() {
   const isImpersonating = !!localStorage.getItem("admin_backup");
 
   const [syncing, setSyncing] = useState(false);
+  const [resolvedWorkerUrl, setResolvedWorkerUrl] = useState<string | null>(null);
+  const workerUrlLoaded = React.useRef(false);
 
   const backToAdmin = () => {
     try {
@@ -1526,9 +1535,33 @@ function EmailViewer() {
     }
   };
 
+  // Load dynamic worker URL from DB settings on mount
+  useEffect(() => {
+    if (workerUrlLoaded.current) return;
+    workerUrlLoaded.current = true;
+    (async () => {
+      try {
+        const data = await apiCall("manage-app", { action: "get_settings", key: "email_accounts" });
+        if (data.value && Array.isArray(data.value)) {
+          const firstWithUrl = data.value.find((acc: any) => acc.cloudflareUrl && acc.cloudflareUrl.trim());
+          if (firstWithUrl) {
+            setResolvedWorkerUrl(firstWithUrl.cloudflareUrl.trim().replace(/\/+$/, ""));
+            return;
+          }
+        }
+      } catch {}
+      // Fallback to env var
+      setResolvedWorkerUrl(getCloudflareWorkerUrl());
+    })();
+  }, []);
+
+  const getWorkerUrl = useCallback(() => {
+    return resolvedWorkerUrl;
+  }, [resolvedWorkerUrl]);
+
   const loadCachedEmails = async () => {
     try {
-      const cfUrl = getCloudflareWorkerUrl();
+      const cfUrl = getWorkerUrl();
       const token = getSessionToken();
       let res: Response;
       if (cfUrl) {
@@ -1549,12 +1582,22 @@ function EmailViewer() {
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
+
+      if (!res.ok) {
+        const errMsg = data?.error || `Failed to load emails (${res.status})`;
+        setError(errMsg);
+        return 0;
+      }
+
       const emailList = (Array.isArray(data) ? data : []) as Email[];
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
+      setError(null);
       setLastUpdated(new Date());
       return emailList.length;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load emails";
+      setError(msg);
       console.error("[loadCached] Error:", err);
       return 0;
     }
@@ -1565,15 +1608,16 @@ function EmailViewer() {
     isFetchingRef.current = true;
     setSyncing(true);
     try {
-      const cfUrl = getCloudflareWorkerUrl();
+      const cfUrl = getWorkerUrl();
       const token = getSessionToken();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 50000);
 
+      let syncRes: Response;
       if (cfUrl) {
         const headers: Record<string, string> = {};
         if (token) headers["X-Session-Token"] = token;
-        await fetch(`${cfUrl}/api/emails/sync`, {
+        syncRes = await fetch(`${cfUrl}/api/emails/sync`, {
           method: "POST", signal: controller.signal, headers,
         });
       } else {
@@ -1583,23 +1627,30 @@ function EmailViewer() {
           "apikey": getApiKey(),
         };
         if (token) headers["X-Session-Token"] = token;
-        const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
+        syncRes = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
           method: "POST", headers, body: JSON.stringify({ mode: "sync" }), signal: controller.signal,
         });
-        const raw = await res.text();
-        let data: any = null;
-        if (raw) { try { data = JSON.parse(raw); } catch {} }
-        if (!res.ok) {
-          const errMsg = data?.error || "Failed to sync emails.";
-          setError(errMsg);
-        }
       }
       clearTimeout(timeout);
+
+      const raw = await syncRes.text();
+      let data: any = null;
+      if (raw) { try { data = JSON.parse(raw); } catch {} }
+
+      if (!syncRes.ok) {
+        const errMsg = data?.error || `Sync failed (${syncRes.status})`;
+        setError(errMsg);
+      } else {
+        setError(null);
+      }
+
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         console.log("[syncIMAP] Timeout - will retry next cycle");
       } else {
+        const msg = err instanceof Error ? err.message : "Sync failed";
+        setError(msg);
         console.error("[syncIMAP] Error:", err);
       }
     } finally {
