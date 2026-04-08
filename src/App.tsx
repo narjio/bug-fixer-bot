@@ -1324,7 +1324,7 @@ function AdminPanel() {
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-blue-500 uppercase">Cloudflare Worker URL</p>
-                            <p className="text-sm text-slate-800 font-medium break-all">{acc.cloudflareUrl || "Default (built-in)"}</p>
+                            <p className="text-sm text-slate-800 font-medium break-all">{acc.cloudflareUrl || getCloudflareWorkerUrl() || "Not configured"}</p>
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-blue-500 uppercase">Label</p>
