@@ -37,19 +37,6 @@ async function verifySessionToken(token, secret) {
   } catch { return null; }
 }
 
-async function checkRateLimit(env, ip) {
-  if (!env.EMAIL_CACHE) return true;
-  const key = `rate:${ip}`;
-  const current = await env.EMAIL_CACHE.get(key);
-  const count = current ? parseInt(current) : 0;
-  if (count >= RATE_LIMIT_MAX) return false;
-  await env.EMAIL_CACHE.put(key, (count + 1).toString(), { expirationTtl: RATE_LIMIT_WINDOW });
-  return true;
-}
-
-function getClientIp(request) {
-  return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 export default {
   async fetch(request, env) {
