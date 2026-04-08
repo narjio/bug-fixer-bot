@@ -21,8 +21,6 @@ const CORS_HEADERS = {
 const CACHE_KEY = "emails_list";
 const CACHE_TIMESTAMP_KEY = "emails_timestamp";
 const STALE_SECONDS = 10;
-const RATE_LIMIT_MAX = 30;
-const RATE_LIMIT_WINDOW = 60;
 
 async function verifySessionToken(token, secret) {
   try {
