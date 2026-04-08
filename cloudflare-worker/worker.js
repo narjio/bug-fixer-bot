@@ -4,6 +4,7 @@
  * - Validates session tokens (HMAC-SHA256)
  * - Rate limits requests per IP
  * - Passes user's assigned accounts to backend
+ * - Forwards real errors instead of masking them
  * 
  * Environment Variables:
  *   SUPABASE_URL, SUPABASE_KEY, SESSION_SECRET
@@ -22,9 +23,8 @@ const CACHE_KEY = "emails_list";
 const CACHE_TIMESTAMP_KEY = "emails_timestamp";
 const STALE_SECONDS = 10;
 const RATE_LIMIT_MAX = 30;
-const RATE_LIMIT_WINDOW = 60; // seconds
+const RATE_LIMIT_WINDOW = 60;
 
-// --- HMAC Session Token Verification ---
 async function verifySessionToken(token, secret) {
   try {
     const [dataB64, sigHex] = token.split(".");
@@ -40,7 +40,6 @@ async function verifySessionToken(token, secret) {
   } catch { return null; }
 }
 
-// --- Rate Limiting via KV ---
 async function checkRateLimit(env, ip) {
   if (!env.EMAIL_CACHE) return true;
   const key = `rate:${ip}`;
@@ -64,7 +63,6 @@ export default {
     const url = new URL(request.url);
     const ip = getClientIp(request);
 
-    // Rate limit check
     const allowed = await checkRateLimit(env, ip);
     if (!allowed) {
       return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again later." }), {
@@ -72,7 +70,7 @@ export default {
       });
     }
 
-    // Authenticate: require session token
+    // Get the raw session token from the request header (forward as-is)
     const sessionToken = request.headers.get("X-Session-Token") || request.headers.get("x-session-token");
     let session = null;
 
@@ -80,9 +78,7 @@ export default {
       session = await verifySessionToken(sessionToken, env.SESSION_SECRET);
     }
 
-    // For /api/emails and /api/emails/sync, require valid session
     if ((url.pathname === "/api/emails" || url.pathname === "/api/emails/sync") && !session) {
-      // Allow unauthenticated access if SESSION_SECRET is not configured (backward compat)
       if (env.SESSION_SECRET) {
         return new Response(JSON.stringify({ error: "Authentication required" }), {
           status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -91,11 +87,11 @@ export default {
     }
 
     if (url.pathname === "/api/emails" && request.method === "GET") {
-      return handleGetEmails(env, session);
+      return handleGetEmails(env, session, sessionToken);
     }
 
     if (url.pathname === "/api/emails/sync" && request.method === "POST") {
-      return handleSync(env, session);
+      return handleSync(env, session, sessionToken);
     }
 
     if (url.pathname === "/api/debug" && request.method === "GET") {
@@ -106,12 +102,11 @@ export default {
   },
 };
 
-async function handleGetEmails(env, session) {
+async function handleGetEmails(env, session, rawToken) {
   if (!env.EMAIL_CACHE) {
-    return fetchDirectFromSupabase(env, session);
+    return fetchDirectFromSupabase(env, session, rawToken);
   }
 
-  // Use per-user cache key if user has assigned accounts
   const userAccountsKey = session?.assignedAccounts ? JSON.stringify(session.assignedAccounts.sort()) : "all";
   const cacheKey = `${CACHE_KEY}:${userAccountsKey}`;
   const tsKey = `${CACHE_TIMESTAMP_KEY}:${userAccountsKey}`;
@@ -125,16 +120,24 @@ async function handleGetEmails(env, session) {
   const age = timestamp ? (now - parseInt(timestamp)) / 1000 : Infinity;
 
   if (!cached) {
-    await refreshFromSupabase(env, session, cacheKey, tsKey);
-    const freshData = await env.EMAIL_CACHE.get(cacheKey);
-    return new Response(freshData || "[]", {
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json", "X-Cache-Age": "0" },
-    });
+    // No cache — fetch directly and return real result (including errors)
+    const result = await fetchDirectFromSupabase(env, session, rawToken);
+    // Also populate cache if successful
+    if (result.status === 200) {
+      const body = await result.clone().text();
+      if (env.EMAIL_CACHE) {
+        await Promise.all([
+          env.EMAIL_CACHE.put(cacheKey, body),
+          env.EMAIL_CACHE.put(tsKey, now.toString()),
+        ]);
+      }
+    }
+    return result;
   }
 
   if (age > STALE_SECONDS) {
     await env.EMAIL_CACHE.put(tsKey, now.toString());
-    refreshFromSupabase(env, session, cacheKey, tsKey).catch(err => console.error("BG refresh error:", err));
+    refreshFromSupabase(env, session, rawToken, cacheKey, tsKey).catch(err => console.error("BG refresh error:", err));
   }
 
   return new Response(cached, {
@@ -142,15 +145,16 @@ async function handleGetEmails(env, session) {
   });
 }
 
-async function handleSync(env, session) {
+async function handleSync(env, session, rawToken) {
   try {
     const headers = {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${env.SUPABASE_KEY}`,
       "apikey": env.SUPABASE_KEY,
     };
-    if (session) {
-      headers["X-Session-Token"] = JSON.stringify(session);
+    // Forward the raw signed session token so backend can verify it
+    if (rawToken) {
+      headers["X-Session-Token"] = rawToken;
     }
 
     const res = await fetch(`${env.SUPABASE_URL}/functions/v1/fetch-emails`, {
@@ -160,7 +164,6 @@ async function handleSync(env, session) {
     const responseText = await res.text();
 
     if (!res.ok) {
-      // Pass through real upstream error
       let errorMsg = "Sync failed";
       try {
         const parsed = JSON.parse(responseText);
@@ -173,10 +176,10 @@ async function handleSync(env, session) {
 
     if (env.EMAIL_CACHE) {
       const userAccountsKey = session?.assignedAccounts ? JSON.stringify(session.assignedAccounts.sort()) : "all";
-      await refreshFromSupabase(env, session, `${CACHE_KEY}:${userAccountsKey}`, `${CACHE_TIMESTAMP_KEY}:${userAccountsKey}`);
+      await refreshFromSupabase(env, session, rawToken, `${CACHE_KEY}:${userAccountsKey}`, `${CACHE_TIMESTAMP_KEY}:${userAccountsKey}`);
     }
 
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(responseText, {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
@@ -199,48 +202,65 @@ async function handleDebug(env) {
   });
 }
 
-async function fetchDirectFromSupabase(env, session) {
+async function fetchDirectFromSupabase(env, session, rawToken) {
   try {
     const bodyPayload = { mode: "cache" };
     if (session?.assignedAccounts) {
       bodyPayload.accountLabels = session.assignedAccounts;
     }
 
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${env.SUPABASE_KEY}`,
+      "apikey": env.SUPABASE_KEY,
+    };
+    // Forward the real signed token
+    if (rawToken) {
+      headers["X-Session-Token"] = rawToken;
+    }
+
     const res = await fetch(`${env.SUPABASE_URL}/functions/v1/fetch-emails`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${env.SUPABASE_KEY}`,
-        "apikey": env.SUPABASE_KEY,
-      },
-      body: JSON.stringify(bodyPayload),
+      method: "POST", headers, body: JSON.stringify(bodyPayload),
     });
+
     const data = await res.text();
+
+    if (!res.ok) {
+      // Return real error instead of masking it
+      return new Response(data, {
+        status: res.status,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json", "X-Cache": "bypass" },
+      });
+    }
+
     return new Response(data, {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json", "X-Cache": "bypass" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ error: "Worker cannot reach backend: " + err.message }), {
+      status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 }
 
-async function refreshFromSupabase(env, session, cacheKey, tsKey) {
+async function refreshFromSupabase(env, session, rawToken, cacheKey, tsKey) {
   try {
     const bodyPayload = { mode: "cache" };
     if (session?.assignedAccounts) {
       bodyPayload.accountLabels = session.assignedAccounts;
     }
 
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${env.SUPABASE_KEY}`,
+      "apikey": env.SUPABASE_KEY,
+    };
+    if (rawToken) {
+      headers["X-Session-Token"] = rawToken;
+    }
+
     const res = await fetch(`${env.SUPABASE_URL}/functions/v1/fetch-emails`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${env.SUPABASE_KEY}`,
-        "apikey": env.SUPABASE_KEY,
-      },
-      body: JSON.stringify(bodyPayload),
+      method: "POST", headers, body: JSON.stringify(bodyPayload),
     });
 
     if (!res.ok) {

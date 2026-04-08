@@ -201,7 +201,7 @@ function ProfileSelectPage() {
           apiCall("manage-app", { action: "get_settings", key: "recaptcha" }).catch(() => ({ value: null })),
         ]);
         setProfiles((usersData.users || []).filter((u: UserData) => u.role === "user"));
-        if (recaptchaData.value?.siteKey) setSiteKey(recaptchaData.value.siteKey);
+        if (recaptchaData.value?.enabled === true && recaptchaData.value?.siteKey) setSiteKey(recaptchaData.value.siteKey);
       } catch (err) {
         console.error("Failed to load profiles:", err);
       } finally {
@@ -357,7 +357,7 @@ function AdminLoginPage() {
     (async () => {
       try {
         const data = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
-        if (data.value?.siteKey) setSiteKey(data.value.siteKey);
+        if (data.value?.enabled === true && data.value?.siteKey) setSiteKey(data.value.siteKey);
       } catch {}
     })();
   }, []);
@@ -665,7 +665,7 @@ function AdminPanel() {
         if (recaptcha.value) {
           setSiteKey(recaptcha.value.siteKey || "");
           setSecretKeyVal(recaptcha.value.secretKey || "");
-          setCaptchaEnabled(!!(recaptcha.value.siteKey));
+          setCaptchaEnabled(recaptcha.value.enabled === true);
         }
       } catch {}
 
@@ -728,23 +728,31 @@ function AdminPanel() {
   }, []);
 
   const toggleCaptcha = async () => {
-    if (captchaEnabled) {
-      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey: "", secretKey: "" } });
-      setSiteKey(""); setSecretKeyVal("");
-      setCaptchaEnabled(false);
-      toast.success("CAPTCHA disabled!");
-    } else {
-      if (!siteKey || !secretKeyVal) { toast.error("Enter both Site Key and Secret Key first"); return; }
-      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
-      setCaptchaEnabled(true);
-      toast.success("CAPTCHA enabled!");
+    try {
+      const newEnabled = !captchaEnabled;
+      if (newEnabled && (!siteKey || !secretKeyVal)) { toast.error("Enter both Site Key and Secret Key first"); return; }
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal, enabled: newEnabled } });
+      // Re-read from backend to confirm
+      const fresh = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
+      setCaptchaEnabled(fresh.value?.enabled === true);
+      setSiteKey(fresh.value?.siteKey || "");
+      setSecretKeyVal(fresh.value?.secretKey || "");
+      toast.success(newEnabled ? "CAPTCHA enabled!" : "CAPTCHA disabled!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to toggle CAPTCHA");
     }
   };
 
   const saveRecaptchaSettings = async () => {
-    await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
-    setCaptchaEnabled(!!(siteKey));
-    toast.success("ReCAPTCHA settings saved!");
+    try {
+      const newEnabled = !!(siteKey && secretKeyVal);
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal, enabled: newEnabled } });
+      const fresh = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
+      setCaptchaEnabled(fresh.value?.enabled === true);
+      toast.success("ReCAPTCHA settings saved!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings");
+    }
   };
 
   const toggleSignInCodeFilter = async () => {
@@ -810,23 +818,25 @@ function AdminPanel() {
     }
   };
 
-  const loginAsUser = async (user: UserData) => {
+  const loginAsUser = async (targetUser: UserData) => {
     try {
+      // Get impersonation token from backend FIRST
+      const data = await apiCall("manage-app", { action: "impersonate", target_user_id: targetUser.id });
+
       // Store admin session backup
       const adminUser = localStorage.getItem("user");
       const adminToken = localStorage.getItem("session_token");
       const adminAuth = localStorage.getItem("admin_auth");
       localStorage.setItem("admin_backup", JSON.stringify({ user: adminUser, token: adminToken, adminAuth }));
 
-      // Get impersonation token from backend
-      const data = await apiCall("manage-app", { action: "impersonate", target_user_id: user.id });
-
+      // Set impersonated user state
       localStorage.setItem("user", JSON.stringify(data.user));
       if (data.sessionToken) localStorage.setItem("session_token", data.sessionToken);
       localStorage.removeItem("admin_auth");
-      checkAuth();
-      navigate("/viewer");
-      toast.success(`Viewing as ${user.name}`);
+
+      // Navigate atomically — use window.location to avoid route guard race
+      toast.success(`Viewing as ${targetUser.name}`);
+      window.location.href = "/viewer";
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to impersonate user");
     }
@@ -1256,7 +1266,7 @@ function AdminPanel() {
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-green-600 uppercase">Cloudflare Worker</p>
-                      <p className="text-sm text-green-900 font-medium break-all">Default (built-in)</p>
+                      <p className="text-sm text-green-900 font-medium break-all">{getCloudflareWorkerUrl() || "Not configured"}</p>
                     </div>
                     <p className="text-[10px] text-green-500 italic mt-1">⚙️ Edit this in the Settings tab</p>
                   </div>
@@ -1314,7 +1324,7 @@ function AdminPanel() {
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-blue-500 uppercase">Cloudflare Worker URL</p>
-                            <p className="text-sm text-slate-800 font-medium break-all">{acc.cloudflareUrl || "Default (built-in)"}</p>
+                            <p className="text-sm text-slate-800 font-medium break-all">{acc.cloudflareUrl || getCloudflareWorkerUrl() || "Not configured"}</p>
                           </div>
                           <div>
                             <p className="text-[10px] font-bold text-blue-500 uppercase">Label</p>
