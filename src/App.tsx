@@ -623,6 +623,7 @@ function AdminPanel() {
   const [emailAccounts, setEmailAccounts] = useState<Array<{ label: string; host: string; port: string; user: string; password: string; cloudflareUrl: string }>>([]);
   const [newAccount, setNewAccount] = useState({ label: "", host: "imap.gmail.com", port: "993", user: "", password: "", cloudflareUrl: "" });
   const [savingAccounts, setSavingAccounts] = useState(false);
+  const [expandedAccount, setExpandedAccount] = useState<number | null>(null);
   const navigate = useNavigate();
   const { user: currentUser, checkAuth } = useAuth();
 
