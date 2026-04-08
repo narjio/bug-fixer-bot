@@ -35,6 +35,9 @@ async function startServer() {
 
   // Proxy: Fetch emails
   app.get("/api/emails", async (_req, res) => {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      return res.status(500).json({ success: false, error: "Server not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY." });
+    }
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/fetch-emails`, {
         method: "POST",
@@ -43,11 +46,11 @@ async function startServer() {
           "Authorization": `Bearer ${SUPABASE_KEY}`,
         },
       });
-      const data = await response.json();
-      res.json(data);
+      const data = await response.text();
+      res.status(response.status).set("Content-Type", "application/json").send(data);
     } catch (err) {
       console.error("Email fetch error:", err);
-      res.status(500).json({ success: false, error: "Failed to fetch emails" });
+      res.status(502).json({ success: false, error: "Cannot reach backend. Check server configuration." });
     }
   });
 
