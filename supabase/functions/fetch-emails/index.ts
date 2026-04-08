@@ -18,6 +18,10 @@ const SIGN_IN_CODE_SUBJECTS = [
   "verification code", "login code", "sign in code",
 ];
 
+const FAST_SYNC_LOOKBACK_MS = 2 * 60 * 60 * 1000;
+const FAST_SYNC_MAX_UIDS = 25;
+const FULL_SYNC_MAX_UIDS = 120;
+
 async function verifySessionToken(token: string, secret: string): Promise<Record<string, any> | null> {
   try {
     const [dataB64, sigHex] = token.split(".");
@@ -55,10 +59,11 @@ async function decryptValue(encrypted: string, secret: string): Promise<string> 
 async function fetchFromAccount(
   supabase: any, imapHost: string, imapPort: number, imapUser: string, imapPassword: string,
   accountLabel: string, cachedIds: Set<string>, filterSignInCodes: boolean, filterPasswordResets: boolean,
+  latestCachedAt?: string | null,
 ): Promise<any[]> {
   const emails: any[] = [];
   let timedOut = false;
-  const timeout = setTimeout(() => { timedOut = true; }, 25000);
+  const timeout = setTimeout(() => { timedOut = true; }, 15000);
 
   const client = new ImapFlow({
     host: imapHost, port: imapPort, secure: true,
@@ -74,6 +79,15 @@ async function fetchFromAccount(
       const since = new Date();
       since.setDate(since.getDate() - 30);
 
+      const parsedLatestCachedAt = latestCachedAt ? new Date(latestCachedAt) : null;
+      const hasRecentCache = !!parsedLatestCachedAt && !Number.isNaN(parsedLatestCachedAt.getTime());
+      if (hasRecentCache && parsedLatestCachedAt) {
+        const recentSince = new Date(parsedLatestCachedAt.getTime() - FAST_SYNC_LOOKBACK_MS);
+        if (recentSince > since) {
+          since.setTime(recentSince.getTime());
+        }
+      }
+
       let netflixUids: number[] = [];
       try {
         const searchResults = await client.search({ from: "info@account.netflix.com", since }, { uid: true });
@@ -83,7 +97,8 @@ async function fetchFromAccount(
       } catch {
         const totalMessages = (client.mailbox as any)?.exists || 0;
         if (totalMessages > 0) {
-          const startSeq = Math.max(1, totalMessages - 499);
+          const fallbackWindow = hasRecentCache ? 150 : 500;
+          const startSeq = Math.max(1, totalMessages - (fallbackWindow - 1));
           for await (const message of client.fetch(`${startSeq}:${totalMessages}`, { envelope: true, uid: true })) {
             if (timedOut) break;
             const fromAddr = message.envelope?.from?.[0]?.address?.toLowerCase() || "";
@@ -94,7 +109,10 @@ async function fetchFromAccount(
 
       netflixUids.sort((a, b) => b - a);
       // Use account-scoped cache ID to avoid collisions across accounts
-      const uncachedUids = netflixUids.filter(uid => !cachedIds.has(`${accountLabel}:${uid}`) && !cachedIds.has(String(uid)));
+      const fetchLimit = hasRecentCache ? FAST_SYNC_MAX_UIDS : FULL_SYNC_MAX_UIDS;
+      const uncachedUids = netflixUids
+        .filter(uid => !cachedIds.has(`${accountLabel}:${uid}`) && !cachedIds.has(String(uid)))
+        .slice(0, fetchLimit);
 
       for (const uid of uncachedUids) {
         if (timedOut) break;
@@ -211,8 +229,19 @@ Deno.serve(async (req) => {
     // MODE: SYNC
     console.log("Sync mode: fetching from IMAP server(s)");
 
-    const { data: cachedRows } = await supabase.from("cached_emails").select("id");
+    const { data: cachedRows } = await supabase.from("cached_emails").select("id, account_label, date");
     const cachedIds = new Set((cachedRows || []).map((r: any) => String(r.id)));
+    const latestCachedByAccount = new Map<string, string>();
+    const hasLegacyNullLabels = (cachedRows || []).some((row: any) => row.account_label == null);
+
+    for (const row of cachedRows || []) {
+      const label = row.account_label || "Primary";
+      if (!row.date) continue;
+      const existing = latestCachedByAccount.get(label);
+      if (!existing || new Date(row.date).getTime() > new Date(existing).getTime()) {
+        latestCachedByAccount.set(label, row.date);
+      }
+    }
 
     const accounts: Array<{ label: string; host: string; port: number; user: string; password: string }> = [];
 
@@ -268,30 +297,51 @@ Deno.serve(async (req) => {
     }
 
     // Backfill: normalize any legacy null account_labels to "Primary"
-    try {
-      await supabase.from("cached_emails").update({ account_label: "Primary" }).is("account_label", null);
-    } catch (e) {
-      console.error("Backfill null labels error:", e);
+    if (hasLegacyNullLabels) {
+      try {
+        await supabase.from("cached_emails").update({ account_label: "Primary" }).is("account_label", null);
+      } catch (e) {
+        console.error("Backfill null labels error:", e);
+      }
     }
 
     const allEmails: any[] = [];
     const accountErrors: Array<{ label: string; error: string }> = [];
 
-    for (const acc of accounts) {
+    const accountResults = await Promise.all(accounts.map(async (acc) => {
       try {
         console.log(`Fetching from account: ${acc.label} (${acc.user})`);
-        const emails = await fetchFromAccount(supabase, acc.host, acc.port, acc.user, acc.password, acc.label, cachedIds, filterSignInCodes, filterPasswordResets);
-        allEmails.push(...emails);
+        const emails = await fetchFromAccount(
+          supabase,
+          acc.host,
+          acc.port,
+          acc.user,
+          acc.password,
+          acc.label,
+          cachedIds,
+          filterSignInCodes,
+          filterPasswordResets,
+          latestCachedByAccount.get(acc.label) || null,
+        );
+        return { label: acc.label, emails, error: null as string | null };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`Error fetching from ${acc.label}:`, errMsg);
         const isAuthError = /auth|login|invalid credentials|authenticationfailed/i.test(errMsg);
-        accountErrors.push({
+        return {
           label: acc.label,
+          emails: [],
           error: isAuthError
             ? `IMAP login failed for "${acc.label}". Check email and app password.`
             : `Failed to connect to "${acc.label}": ${errMsg}`,
-        });
+        };
+      }
+    }));
+
+    for (const result of accountResults) {
+      allEmails.push(...result.emails);
+      if (result.error) {
+        accountErrors.push({ label: result.label, error: result.error });
       }
     }
 

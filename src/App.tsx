@@ -1518,7 +1518,7 @@ function EmailViewer() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [otpCopied, setOtpCopied] = useState(false);
-  const refreshIntervalSeconds = 10;
+  const refreshIntervalSeconds = 5;
   const [countdown, setCountdown] = useState(refreshIntervalSeconds);
   const isFetchingRef = React.useRef(false);
   const navigate = useNavigate();
@@ -1528,10 +1528,11 @@ function EmailViewer() {
   const isImpersonating = !!localStorage.getItem("admin_backup");
 
   const [syncing, setSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [resolvedWorkerUrl, setResolvedWorkerUrl] = useState<string | null>(null);
   const workerUrlLoaded = React.useRef(false);
   const lastSyncTime = React.useRef(0);
-  const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 min between auto syncs
+  const SYNC_THROTTLE_MS = 20 * 1000; // keep inbox hot without waiting minutes
   const [hiddenCount, setHiddenCount] = useState(0);
   const [stale, setStale] = useState(false);
 
@@ -1610,9 +1611,11 @@ function EmailViewer() {
     });
   };
 
-  const loadCachedEmails = async () => {
+  const loadCachedEmails = async (options?: { direct?: boolean }) => {
     try {
-      const res = await fetchWithFallback("/api/emails", "GET");
+      const res = options?.direct
+        ? await fetchDirect("POST", { mode: "cache" })
+        : await fetchWithFallback("/api/emails", "GET");
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
@@ -1721,10 +1724,10 @@ function EmailViewer() {
       } else {
         setError(null);
         setStale(false);
+        lastSyncTime.current = Date.now();
       }
 
-      lastSyncTime.current = Date.now();
-      await loadCachedEmails();
+      await loadCachedEmails({ direct: true });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         console.log("[syncIMAP] Timeout - will retry next cycle");
@@ -1741,28 +1744,31 @@ function EmailViewer() {
   };
 
   const fetchEmails = async () => {
-    // Immediate cache reload for fast feedback
-    await loadCachedEmails();
-    setCountdown(refreshIntervalSeconds);
-    // Background sync (non-blocking)
-    syncFromImap();
+    setRefreshing(true);
+    try {
+      await loadCachedEmails();
+      setCountdown(refreshIntervalSeconds);
+      void syncFromImap();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
     setLoading(true);
     loadCachedEmails().then(() => {
       setLoading(false);
-      syncFromImap();
+      void syncFromImap();
     });
     loadHiddenCount();
 
     const cacheInterval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          loadCachedEmails();
+          void loadCachedEmails();
           // Auto background sync if enough time passed
-          if (Date.now() - lastSyncTime.current > SYNC_THROTTLE_MS) {
-            syncFromImap();
+          if (document.visibilityState === "visible" && Date.now() - lastSyncTime.current > SYNC_THROTTLE_MS) {
+            void syncFromImap();
           }
           return refreshIntervalSeconds;
         }
@@ -1772,9 +1778,9 @@ function EmailViewer() {
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        loadCachedEmails();
+        void loadCachedEmails();
         if (Date.now() - lastSyncTime.current > SYNC_THROTTLE_MS) {
-          syncFromImap();
+          void syncFromImap();
         }
       }
     };
