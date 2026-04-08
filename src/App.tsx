@@ -728,23 +728,31 @@ function AdminPanel() {
   }, []);
 
   const toggleCaptcha = async () => {
-    if (captchaEnabled) {
-      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey: "", secretKey: "" } });
-      setSiteKey(""); setSecretKeyVal("");
-      setCaptchaEnabled(false);
-      toast.success("CAPTCHA disabled!");
-    } else {
-      if (!siteKey || !secretKeyVal) { toast.error("Enter both Site Key and Secret Key first"); return; }
-      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
-      setCaptchaEnabled(true);
-      toast.success("CAPTCHA enabled!");
+    try {
+      const newEnabled = !captchaEnabled;
+      if (newEnabled && (!siteKey || !secretKeyVal)) { toast.error("Enter both Site Key and Secret Key first"); return; }
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal, enabled: newEnabled } });
+      // Re-read from backend to confirm
+      const fresh = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
+      setCaptchaEnabled(fresh.value?.enabled === true);
+      setSiteKey(fresh.value?.siteKey || "");
+      setSecretKeyVal(fresh.value?.secretKey || "");
+      toast.success(newEnabled ? "CAPTCHA enabled!" : "CAPTCHA disabled!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to toggle CAPTCHA");
     }
   };
 
   const saveRecaptchaSettings = async () => {
-    await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal } });
-    setCaptchaEnabled(!!(siteKey));
-    toast.success("ReCAPTCHA settings saved!");
+    try {
+      const newEnabled = !!(siteKey && secretKeyVal);
+      await apiCall("manage-app", { action: "set_settings", key: "recaptcha", value: { siteKey, secretKey: secretKeyVal, enabled: newEnabled } });
+      const fresh = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
+      setCaptchaEnabled(fresh.value?.enabled === true);
+      toast.success("ReCAPTCHA settings saved!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings");
+    }
   };
 
   const toggleSignInCodeFilter = async () => {
