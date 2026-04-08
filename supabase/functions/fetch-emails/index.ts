@@ -18,7 +18,6 @@ const SIGN_IN_CODE_SUBJECTS = [
   "verification code", "login code", "sign in code",
 ];
 
-// --- Session Token Verification ---
 async function verifySessionToken(token: string, secret: string): Promise<Record<string, any> | null> {
   try {
     const [dataB64, sigHex] = token.split(".");
@@ -34,7 +33,6 @@ async function verifySessionToken(token: string, secret: string): Promise<Record
   } catch { return null; }
 }
 
-// --- AES-256-GCM decryption ---
 async function deriveEncKey(secret: string): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", encoder.encode(secret), "PBKDF2", false, ["deriveKey"]);
@@ -95,7 +93,8 @@ async function fetchFromAccount(
       }
 
       netflixUids.sort((a, b) => b - a);
-      const uncachedUids = netflixUids.filter(uid => !cachedIds.has(String(uid)));
+      // Use account-scoped cache ID to avoid collisions across accounts
+      const uncachedUids = netflixUids.filter(uid => !cachedIds.has(`${accountLabel}:${uid}`) && !cachedIds.has(String(uid)));
 
       for (const uid of uncachedUids) {
         if (timedOut) break;
@@ -105,10 +104,7 @@ async function fetchFromAccount(
 
           const envSubject = (fullMsg.envelope?.subject || "").toLowerCase();
 
-          // Skip password reset emails (toggleable)
           if (filterPasswordResets && PASSWORD_RESET_SUBJECTS.some(kw => envSubject.includes(kw))) continue;
-
-          // Skip sign-in code emails if filter is on
           if (filterSignInCodes && SIGN_IN_CODE_SUBJECTS.some(kw => envSubject.includes(kw))) continue;
 
           const parsed = await simpleParser(fullMsg.source, { skipImageLinks: true, skipTextLinks: true });
@@ -116,7 +112,7 @@ async function fetchFromAccount(
           const otpMatch = bodyText.match(/\b\d{4,8}\b/);
 
           emails.push({
-            id: String(uid), subject: parsed.subject || fullMsg.envelope?.subject || "",
+            id: `${accountLabel}:${uid}`, subject: parsed.subject || fullMsg.envelope?.subject || "",
             from: parsed.from?.text || "Netflix <info@account.netflix.com>",
             to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to[0]?.text : parsed.to.text) : undefined,
             date: parsed.date, otp: otpMatch ? otpMatch[0] : null,
@@ -151,9 +147,8 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch {}
     const mode = body.mode || "sync";
 
-    // Read email filter settings
     let filterSignInCodes = false;
-    let filterPasswordResets = true; // Default: hide password reset emails
+    let filterPasswordResets = true;
     try {
       const { data: filterData } = await supabase
         .from("app_settings").select("value").eq("key", "email_filters").single();
@@ -165,7 +160,6 @@ Deno.serve(async (req) => {
 
     // MODE: CACHE
     if (mode === "cache") {
-      // Check for session token to enforce per-user account filtering
       let accountFilter: string[] | null = null;
       const sessionToken = req.headers.get("x-session-token") || body.sessionToken;
       if (sessionToken) {
@@ -177,16 +171,16 @@ Deno.serve(async (req) => {
 
       let query = supabase.from("cached_emails").select("*").order("date", { ascending: false });
 
-      // Filter by account labels if user has assigned accounts
       if (accountFilter && accountFilter.length > 0) {
+        // Include both exact label matches AND legacy null labels mapped as Primary
         query = query.in("account_label", accountFilter);
       }
 
       const { data: cached, error: cacheErr } = await query;
 
       if (cacheErr) {
-        return new Response(JSON.stringify([]), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        return new Response(JSON.stringify({ error: "Database query failed: " + cacheErr.message }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
@@ -220,10 +214,8 @@ Deno.serve(async (req) => {
     const { data: cachedRows } = await supabase.from("cached_emails").select("id");
     const cachedIds = new Set((cachedRows || []).map((r: any) => String(r.id)));
 
-    // Build list of accounts
     const accounts: Array<{ label: string; host: string; port: number; user: string; password: string }> = [];
 
-    // Multi-account config (decrypt passwords)
     try {
       const { data: accountsData } = await supabase
         .from("app_settings").select("value").eq("key", "email_accounts").single();
@@ -243,7 +235,6 @@ Deno.serve(async (req) => {
       }
     } catch {}
 
-    // Primary config from app_settings or env vars
     let primaryHost = "", primaryPort = 993, primaryUser = "", primaryPassword = "";
     try {
       const { data } = await supabase.from("app_settings").select("value").eq("key", "config").single();
@@ -276,6 +267,13 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Backfill: normalize any legacy null account_labels to "Primary"
+    try {
+      await supabase.from("cached_emails").update({ account_label: "Primary" }).is("account_label", null);
+    } catch (e) {
+      console.error("Backfill null labels error:", e);
+    }
+
     const allEmails: any[] = [];
     const accountErrors: Array<{ label: string; error: string }> = [];
 
@@ -297,7 +295,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // If ALL accounts failed, return an error instead of faking success
     if (accountErrors.length > 0 && accountErrors.length === accounts.length) {
       const combinedMsg = accountErrors.map(e => e.error).join(" | ");
       return new Response(
@@ -312,15 +309,13 @@ Deno.serve(async (req) => {
       const rows = allEmails.map((e: any) => ({
         id: String(e.id), subject: e.subject, from_address: e.from, to_address: e.to || null,
         date: e.date, otp: e.otp || null, preview: e.preview || null, html: e.html || null,
-        account_label: e.account_label || null, cached_at: new Date().toISOString(),
+        account_label: e.account_label || "Primary", cached_at: new Date().toISOString(),
       }));
 
       const { error: upsertErr } = await supabase.from("cached_emails").upsert(rows, { onConflict: "id" });
       if (upsertErr) console.error("Cache upsert error:", upsertErr);
     }
 
-    // Return emails with partial warnings if some accounts failed
-    const response: any = allEmails;
     if (accountErrors.length > 0) {
       return new Response(JSON.stringify({
         emails: allEmails,
