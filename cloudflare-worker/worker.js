@@ -2,7 +2,6 @@
  * Cloudflare Worker — Email Cache Proxy (Security Hardened)
  * 
  * - Validates session tokens (HMAC-SHA256)
- * - Rate limits requests per IP
  * - Passes user's assigned accounts to backend
  * - Forwards real errors instead of masking them
  * 
