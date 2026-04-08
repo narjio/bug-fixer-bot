@@ -241,6 +241,7 @@ Deno.serve(async (req) => {
     if (action === "change_password") {
       const { id, current_password, new_password } = params;
       if (!id || !new_password) throw new Error("ID and new password required");
+      if (new_password.length < 6) throw new Error("Password must be at least 6 characters");
 
       const { data: user, error: fetchErr } = await supabase
         .from("app_users")
@@ -250,12 +251,22 @@ Deno.serve(async (req) => {
       if (fetchErr || !user) throw new Error("User not found");
 
       if (current_password) {
+        // Normal self-change: verify current password
         const match = await verifyPassword(current_password, user.password);
         if (!match) throw new Error("Current password is incorrect");
       } else {
-        // Admin changing user password — require admin session
-        try { await requireAdmin(req); } catch {
-          throw new Error("Admin session required or provide current password");
+        // Either admin reset OR forced first-time password set
+        const token = req.headers.get("x-session-token");
+        if (!token) throw new Error("Authentication required to change password");
+        const session = await verifySessionToken(token, SESSION_SECRET);
+        if (!session) throw new Error("Session expired or invalid");
+
+        if (session.role === "admin") {
+          // Admin reset — allowed
+        } else if (session.userId === id && user.must_change_password) {
+          // First-time forced password set — allowed
+        } else {
+          throw new Error("Provide your current password or contact an admin");
         }
       }
 
