@@ -861,8 +861,8 @@ function AdminPanel() {
     try {
       await apiCall("manage-app", { action: "set_settings", key: "email_accounts", value: updated });
       toast.success("Email account added!");
-    } catch {
-      toast.error("Failed to save account");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save account");
     }
   };
 
