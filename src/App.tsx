@@ -1,5 +1,5 @@
 import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
-import { Mail, RefreshCw, ShieldCheck, Clock, AlertCircle, Copy, Check, ArrowLeft, Lock, Key, LogOut, Settings, Plus, Users, Trash2, CheckCircle2, X, Eye, KeyRound, Filter, Server, BarChart3, Globe } from "lucide-react";
+import { Mail, RefreshCw, ShieldCheck, Clock, AlertCircle, Copy, Check, ArrowLeft, Lock, Key, LogOut, Settings, Plus, Users, Trash2, CheckCircle2, X, Eye, KeyRound, Filter, Server, BarChart3, Globe, Edit } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { Toaster, toast } from "sonner";
@@ -30,19 +30,31 @@ function getApiKey() {
   return getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key);
 }
 
+function getSessionToken(): string | null {
+  try {
+    return localStorage.getItem("session_token");
+  } catch { return null; }
+}
+
 async function apiCall(functionName: string, body: any) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${getApiKey()}`,
+  };
+  const token = getSessionToken();
+  if (token) headers["X-Session-Token"] = token;
+
   const res = await fetch(`${getApiBase()}/functions/v1/${functionName}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${getApiKey()}`,
-    },
-    body: JSON.stringify(body),
+    method: "POST", headers, body: JSON.stringify(body),
   });
   const text = await res.text();
   try {
     const data = JSON.parse(text);
     if (!res.ok) throw new Error(data?.error || "Request failed");
+    // Auto-store session token from login
+    if (data.sessionToken) {
+      localStorage.setItem("session_token", data.sessionToken);
+    }
     return data;
   } catch {
     throw new Error("Something went wrong. Please try again.");
@@ -109,7 +121,7 @@ interface Email {
   id: string; subject: string; from: string; to?: string; date: string; otp: string | null; preview: string; html: string;
 }
 interface UserData {
-  id: string; username: string; name: string; role: "admin" | "user"; totpSecret?: string; mustChangePassword?: boolean;
+  id: string; username: string; name: string; role: "admin" | "user"; totpSecret?: string; mustChangePassword?: boolean; assignedAccounts?: string[] | null;
 }
 
 // --- Profile Colors ---
@@ -212,11 +224,7 @@ function ProfileSelectPage() {
 
       try {
         await apiCall("send-login-notification", {
-          username: data.user.username,
-          name: data.user.name,
-          status: "success",
-          lat: loc.lat,
-          lon: loc.lon,
+          username: data.user.username, name: data.user.name, status: "success", lat: loc.lat, lon: loc.lon,
         });
       } catch {}
 
@@ -597,6 +605,7 @@ function AdminPanel() {
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newName, setNewName] = useState("");
+  const [newUserAccounts, setNewUserAccounts] = useState<string[]>([]);
   const [siteKey, setSiteKey] = useState("");
   const [secretKeyVal, setSecretKeyVal] = useState("");
   const [captchaEnabled, setCaptchaEnabled] = useState(false);
@@ -606,19 +615,29 @@ function AdminPanel() {
   const [changingUserPass, setChangingUserPass] = useState<string | null>(null);
   const [userNewPass, setUserNewPass] = useState("");
   const [showSignInCodes, setShowSignInCodes] = useState(true);
+  const [showPasswordResets, setShowPasswordResets] = useState(false);
+  const [editingUserAccounts, setEditingUserAccounts] = useState<string | null>(null);
+  const [editAccountsList, setEditAccountsList] = useState<string[]>([]);
   const [serverConfig, setServerConfig] = useState({
     TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "", IMAP_HOST: "", IMAP_PORT: "", IMAP_USER: "", IMAP_PASSWORD: "",
   });
   const [savingConfig, setSavingConfig] = useState(false);
-  // Multi-account IMAP
-  const [emailAccounts, setEmailAccounts] = useState<Array<{ label: string; host: string; port: string; user: string; password: string }>>([]);
-  const [newAccount, setNewAccount] = useState({ label: "", host: "imap.gmail.com", port: "993", user: "", password: "" });
+  const [emailAccounts, setEmailAccounts] = useState<Array<{ label: string; host: string; port: string; user: string; password: string; cloudflareUrl: string }>>([]);
+  const [newAccount, setNewAccount] = useState({ label: "", host: "imap.gmail.com", port: "993", user: "", password: "", cloudflareUrl: "" });
   const [savingAccounts, setSavingAccounts] = useState(false);
   const navigate = useNavigate();
   const { user: currentUser, checkAuth } = useAuth();
 
-  // Stats
   const [stats, setStats] = useState({ totalUsers: 0, totalEmails: 0 });
+
+  // Get all available account labels for assignment
+  const getAvailableAccounts = (): string[] => {
+    const labels = ["Primary"];
+    emailAccounts.forEach(acc => {
+      if (acc.label && !labels.includes(acc.label)) labels.push(acc.label);
+    });
+    return labels;
+  };
 
   useEffect(() => {
     (async () => {
@@ -657,6 +676,7 @@ function AdminPanel() {
         const filters = await apiCall("manage-app", { action: "get_settings", key: "email_filters" });
         if (filters.value) {
           setShowSignInCodes(filters.value.showSignInCodes !== false);
+          setShowPasswordResets(filters.value.showPasswordResets === true);
         }
       } catch {}
 
@@ -667,12 +687,14 @@ function AdminPanel() {
         }
       } catch {}
 
-      // Get email count
       try {
         const cfUrl = getCloudflareWorkerUrl();
+        const token = getSessionToken();
         let res: Response;
         if (cfUrl) {
-          res = await fetch(`${cfUrl}/api/emails`);
+          const headers: Record<string, string> = {};
+          if (token) headers["X-Session-Token"] = token;
+          res = await fetch(`${cfUrl}/api/emails`, { headers });
         } else {
           res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
             method: "POST",
@@ -710,11 +732,23 @@ function AdminPanel() {
     const newVal = !showSignInCodes;
     setShowSignInCodes(newVal);
     try {
-      await apiCall("manage-app", { action: "set_settings", key: "email_filters", value: { showSignInCodes: newVal } });
+      await apiCall("manage-app", { action: "set_settings", key: "email_filters", value: { showSignInCodes: newVal, showPasswordResets } });
       toast.success(newVal ? "Sign-in code emails will be shown" : "Sign-in code emails will be hidden");
-    } catch (err) {
+    } catch {
       toast.error("Failed to save filter setting");
       setShowSignInCodes(!newVal);
+    }
+  };
+
+  const togglePasswordResetFilter = async () => {
+    const newVal = !showPasswordResets;
+    setShowPasswordResets(newVal);
+    try {
+      await apiCall("manage-app", { action: "set_settings", key: "email_filters", value: { showSignInCodes, showPasswordResets: newVal } });
+      toast.success(newVal ? "Password reset emails will be shown" : "Password reset emails will be hidden");
+    } catch {
+      toast.error("Failed to save filter setting");
+      setShowPasswordResets(!newVal);
     }
   };
 
@@ -735,10 +769,7 @@ function AdminPanel() {
     setChangingPassword(true);
     try {
       await apiCall("manage-app", {
-        action: "change_password",
-        id: currentUser?.id,
-        current_password: currentPassword,
-        new_password: newAdminPassword,
+        action: "change_password", id: currentUser?.id, current_password: currentPassword, new_password: newAdminPassword,
       });
       setCurrentPassword(""); setNewAdminPassword("");
       toast.success("Password changed successfully!");
@@ -760,18 +791,36 @@ function AdminPanel() {
     }
   };
 
-  const loginAsUser = (user: UserData) => {
-    localStorage.setItem("user", JSON.stringify({ ...user, mustChangePassword: false }));
-    checkAuth();
-    navigate("/viewer");
-    toast.success(`Logged in as ${user.name}`);
+  const loginAsUser = async (user: UserData) => {
+    try {
+      // Store admin session backup
+      const adminUser = localStorage.getItem("user");
+      const adminToken = localStorage.getItem("session_token");
+      const adminAuth = localStorage.getItem("admin_auth");
+      localStorage.setItem("admin_backup", JSON.stringify({ user: adminUser, token: adminToken, adminAuth }));
+
+      // Get impersonation token from backend
+      const data = await apiCall("manage-app", { action: "impersonate", target_user_id: user.id });
+
+      localStorage.setItem("user", JSON.stringify(data.user));
+      if (data.sessionToken) localStorage.setItem("session_token", data.sessionToken);
+      localStorage.removeItem("admin_auth");
+      checkAuth();
+      navigate("/viewer");
+      toast.success(`Viewing as ${user.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to impersonate user");
+    }
   };
 
   const createUser = async () => {
     if (!newUsername || !newPassword || !newName) { toast.error("Please fill all fields"); return; }
     try {
-      await apiCall("manage-app", { action: "create", username: newUsername, password: newPassword, name: newName, role: "user" });
-      setNewUsername(""); setNewPassword(""); setNewName("");
+      await apiCall("manage-app", {
+        action: "create", username: newUsername, password: newPassword, name: newName, role: "user",
+        assigned_accounts: newUserAccounts.length > 0 ? newUserAccounts : null,
+      });
+      setNewUsername(""); setNewPassword(""); setNewName(""); setNewUserAccounts([]);
       toast.success("User created!");
       const data = await apiCall("manage-app", { action: "list" });
       setUsers(data.users || []);
@@ -796,11 +845,11 @@ function AdminPanel() {
     }
     const updated = [...emailAccounts, { ...newAccount }];
     setEmailAccounts(updated);
-    setNewAccount({ label: "", host: "imap.gmail.com", port: "993", user: "", password: "" });
+    setNewAccount({ label: "", host: "imap.gmail.com", port: "993", user: "", password: "", cloudflareUrl: "" });
     try {
       await apiCall("manage-app", { action: "set_settings", key: "email_accounts", value: updated });
       toast.success("Email account added!");
-    } catch (err) {
+    } catch {
       toast.error("Failed to save account");
     }
   };
@@ -811,8 +860,20 @@ function AdminPanel() {
     try {
       await apiCall("manage-app", { action: "set_settings", key: "email_accounts", value: updated });
       toast.success("Account removed!");
-    } catch (err) {
+    } catch {
       toast.error("Failed to remove account");
+    }
+  };
+
+  const updateUserAccounts = async (userId: string) => {
+    try {
+      await apiCall("manage-app", { action: "update_user", id: userId, assigned_accounts: editAccountsList.length > 0 ? editAccountsList : null });
+      setEditingUserAccounts(null);
+      const data = await apiCall("manage-app", { action: "list" });
+      setUsers(data.users || []);
+      toast.success("User accounts updated!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update");
     }
   };
 
@@ -853,7 +914,7 @@ function AdminPanel() {
           </div>
           <div className="bg-white rounded-2xl border p-4 flex items-center gap-3">
             <div className="bg-purple-50 p-2.5 rounded-xl"><Globe className="w-5 h-5 text-purple-600" /></div>
-            <div><p className="text-2xl font-black text-slate-900">{emailAccounts.length || 1}</p><p className="text-xs text-slate-500">Email Accounts</p></div>
+            <div><p className="text-2xl font-black text-slate-900">{emailAccounts.length + 1}</p><p className="text-xs text-slate-500">Email Accounts</p></div>
           </div>
           <div className="bg-white rounded-2xl border p-4 flex items-center gap-3">
             <div className="bg-amber-50 p-2.5 rounded-xl"><ShieldCheck className="w-5 h-5 text-amber-600" /></div>
@@ -894,6 +955,26 @@ function AdminPanel() {
                   className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
                 <input type="password" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+
+                {/* IMAP Account Assignment */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Assign IMAP Accounts</label>
+                  <div className="space-y-1.5">
+                    {getAvailableAccounts().map(label => (
+                      <label key={label} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={newUserAccounts.includes(label)}
+                          onChange={(e) => {
+                            if (e.target.checked) setNewUserAccounts([...newUserAccounts, label]);
+                            else setNewUserAccounts(newUserAccounts.filter(a => a !== label));
+                          }}
+                          className="w-4 h-4 rounded border-slate-300 text-red-600 focus:ring-red-500" />
+                        <span className="text-sm text-slate-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">Leave empty = access all accounts</p>
+                </div>
+
                 <button onClick={createUser}
                   className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 transition-all text-sm">
                   Create User
@@ -919,13 +1000,27 @@ function AdminPanel() {
                         <div>
                           <p className="font-bold text-slate-900">{u.name}</p>
                           <p className="text-xs text-slate-500">@{u.username} • <span className={u.role === "admin" ? "text-red-600 font-bold" : "text-blue-600"}>{u.role}</span></p>
+                          {u.assignedAccounts && u.assignedAccounts.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {u.assignedAccounts.map((a: string) => (
+                                <span key={a} className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded-md font-bold">{a}</span>
+                              ))}
+                            </div>
+                          )}
+                          {(!u.assignedAccounts || u.assignedAccounts.length === 0) && u.role !== "admin" && (
+                            <p className="text-[10px] text-slate-400 mt-0.5">All accounts</p>
+                          )}
                         </div>
                       </div>
                       {u.role !== "admin" && (
                         <div className="flex items-center gap-1">
-                          <button onClick={() => loginAsUser(u)} title="Login as user"
+                          <button onClick={() => loginAsUser(u)} title="View as user"
                             className="p-2 hover:bg-blue-50 text-blue-400 hover:text-blue-600 rounded-lg transition-colors">
                             <Eye className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => { setEditingUserAccounts(editingUserAccounts === u.id ? null : u.id); setEditAccountsList((u as any).assignedAccounts || []); }} title="Edit accounts"
+                            className="p-2 hover:bg-green-50 text-green-400 hover:text-green-600 rounded-lg transition-colors">
+                            <Edit className="w-4 h-4" />
                           </button>
                           <button onClick={() => { setChangingUserPass(changingUserPass === u.id ? null : u.id); setUserNewPass(""); }} title="Change password"
                             className="p-2 hover:bg-amber-50 text-amber-400 hover:text-amber-600 rounded-lg transition-colors">
@@ -938,6 +1033,31 @@ function AdminPanel() {
                         </div>
                       )}
                     </div>
+
+                    {/* Edit Assigned Accounts */}
+                    {editingUserAccounts === u.id && u.role !== "admin" && (
+                      <div className="mt-3 p-3 bg-white rounded-xl border">
+                        <p className="text-xs font-bold text-slate-500 mb-2">Assign IMAP Accounts</p>
+                        <div className="space-y-1.5 mb-2">
+                          {getAvailableAccounts().map(label => (
+                            <label key={label} className="flex items-center gap-2 p-1.5 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+                              <input type="checkbox" checked={editAccountsList.includes(label)}
+                                onChange={(e) => {
+                                  if (e.target.checked) setEditAccountsList([...editAccountsList, label]);
+                                  else setEditAccountsList(editAccountsList.filter(a => a !== label));
+                                }}
+                                className="w-4 h-4 rounded border-slate-300 text-red-600 focus:ring-red-500" />
+                              <span className="text-sm text-slate-700">{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <button onClick={() => updateUserAccounts(u.id)}
+                          className="w-full bg-green-600 text-white text-xs font-bold py-2 rounded-lg hover:bg-green-700 transition-all">
+                          Save Accounts
+                        </button>
+                      </div>
+                    )}
+
                     {changingUserPass === u.id && u.role !== "admin" && (
                       <div className="mt-3 flex gap-2">
                         <input type="password" placeholder="New password (min 6)" value={userNewPass} onChange={(e) => setUserNewPass(e.target.value)}
@@ -990,7 +1110,7 @@ function AdminPanel() {
               </div>
             </section>
 
-            {/* Email Filter */}
+            {/* Email Filters */}
             <section className="bg-white p-5 sm:p-6 rounded-2xl border shadow-sm">
               <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
                 <div className="bg-purple-50 p-1.5 rounded-lg"><Filter className="w-4 h-4 text-purple-600" /></div>
@@ -1000,11 +1120,21 @@ function AdminPanel() {
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border">
                   <div>
                     <p className="font-bold text-sm text-slate-900">Show Sign-In Code Emails</p>
-                    <p className="text-xs text-slate-500 mt-1">When OFF, "sign-in code" and "sign-in activity" emails are hidden from the inbox</p>
+                    <p className="text-xs text-slate-500 mt-1">When OFF, sign-in code & activity emails are hidden</p>
                   </div>
                   <button onClick={toggleSignInCodeFilter}
                     className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ml-3 ${showSignInCodes ? "bg-green-500" : "bg-slate-300"}`}>
                     <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showSignInCodes ? "translate-x-6" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border">
+                  <div>
+                    <p className="font-bold text-sm text-slate-900">Show Password Reset Emails</p>
+                    <p className="text-xs text-slate-500 mt-1">When OFF, password reset emails are hidden from inbox</p>
+                  </div>
+                  <button onClick={togglePasswordResetFilter}
+                    className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ml-3 ${showPasswordResets ? "bg-green-500" : "bg-slate-300"}`}>
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showPasswordResets ? "translate-x-6" : "translate-x-0.5"}`} />
                   </button>
                 </div>
               </div>
@@ -1052,6 +1182,9 @@ function AdminPanel() {
                   className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
                 <input type="password" placeholder="App Password" value={newAccount.password} onChange={(e) => setNewAccount({ ...newAccount, password: e.target.value })}
                   className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+                <input type="text" placeholder="Cloudflare Worker URL (optional)" value={newAccount.cloudflareUrl} onChange={(e) => setNewAccount({ ...newAccount, cloudflareUrl: e.target.value })}
+                  className="w-full bg-slate-50 border rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-500 text-sm" />
+                <p className="text-[10px] text-slate-400">If empty, uses default worker URL</p>
                 <button onClick={addEmailAccount}
                   className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 transition-all text-sm">
                   Add Account
@@ -1064,32 +1197,45 @@ function AdminPanel() {
               <h2 className="font-black text-base sm:text-lg mb-4 flex items-center gap-2">
                 <div className="bg-blue-50 p-1.5 rounded-lg"><Mail className="w-4 h-4 text-blue-600" /></div>
                 Connected Accounts
-                <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full ml-auto">{emailAccounts.length}</span>
+                <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full ml-auto">{emailAccounts.length + 1}</span>
               </h2>
-              {emailAccounts.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="bg-slate-50 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Mail className="text-slate-300 w-6 h-6" />
+
+              {/* Primary Account (from Settings) */}
+              <div className="p-4 bg-green-50 rounded-2xl border border-green-100 mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="bg-green-200 p-2 rounded-xl">
+                    <Server className="w-4 h-4 text-green-700" />
                   </div>
-                  <p className="text-slate-400 text-sm">No extra accounts added.</p>
-                  <p className="text-slate-400 text-xs mt-1">The primary IMAP config in Settings tab is used by default.</p>
+                  <div>
+                    <p className="font-bold text-sm text-green-900">Primary</p>
+                    <p className="text-xs text-green-700">{serverConfig.IMAP_USER || "Configure in Settings tab"} • {serverConfig.IMAP_HOST || "imap.gmail.com"}:{serverConfig.IMAP_PORT || "993"}</p>
+                  </div>
+                </div>
+              </div>
+
+              {emailAccounts.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-slate-400 text-sm">No additional accounts. Add one using the form.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {emailAccounts.map((acc, i) => (
-                    <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-green-100 p-2 rounded-xl">
-                          <Server className="w-4 h-4 text-green-600" />
+                    <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="bg-blue-100 p-2 rounded-xl">
+                            <Server className="w-4 h-4 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-sm text-slate-900">{acc.label}</p>
+                            <p className="text-xs text-slate-500">{acc.user} • {acc.host}:{acc.port}</p>
+                            {acc.cloudflareUrl && <p className="text-[10px] text-slate-400 mt-0.5">CF: {acc.cloudflareUrl.substring(0, 40)}...</p>}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-sm text-slate-900">{acc.label}</p>
-                          <p className="text-xs text-slate-500">{acc.user} • {acc.host}:{acc.port}</p>
-                        </div>
+                        <button onClick={() => removeEmailAccount(i)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
-                      <button onClick={() => removeEmailAccount(i)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -1107,6 +1253,7 @@ function AdminPanel() {
                 <div className="bg-blue-50 p-1.5 rounded-lg"><Server className="w-4 h-4 text-blue-600" /></div>
                 Telegram Notifications
               </h2>
+              <p className="text-[10px] text-slate-400 mb-3">💡 Save once to persist these values</p>
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Bot Token</label>
@@ -1129,6 +1276,7 @@ function AdminPanel() {
                 <div className="bg-red-50 p-1.5 rounded-lg"><Mail className="w-4 h-4 text-red-600" /></div>
                 Primary IMAP Server
               </h2>
+              <p className="text-[10px] text-slate-400 mb-3">💡 Save once to persist these values</p>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1189,8 +1337,7 @@ function ChangePasswordModal({ user, onDone, forced = false }: { user: UserData;
     setLoading(true);
     try {
       await apiCall("manage-app", {
-        action: "change_password",
-        id: user.id,
+        action: "change_password", id: user.id,
         ...(forced ? {} : { current_password: currentPass }),
         new_password: newPass,
       });
@@ -1248,7 +1395,7 @@ function ChangePasswordModal({ user, onDone, forced = false }: { user: UserData;
               <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
             </div>
           )}
-          <div className={`flex gap-3 pt-1 ${forced ? "" : ""}`}>
+          <div className="flex gap-3 pt-1">
             {!forced && (
               <button type="button" onClick={onDone}
                 className="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-200 transition-all active:scale-95">
@@ -1282,28 +1429,42 @@ function EmailViewer() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [showChangePassword, setShowChangePassword] = useState(!!user.mustChangePassword);
   const [forcedPasswordChange] = useState(!!user.mustChangePassword);
+  const isImpersonating = !!localStorage.getItem("admin_backup");
 
   const [syncing, setSyncing] = useState(false);
-  // syncIntervalRef removed — no more auto IMAP sync
 
-  // Load cached emails from DB (instant)
+  const backToAdmin = () => {
+    try {
+      const backup = JSON.parse(localStorage.getItem("admin_backup") || "{}");
+      if (backup.user) localStorage.setItem("user", backup.user);
+      if (backup.token) localStorage.setItem("session_token", backup.token);
+      if (backup.adminAuth) localStorage.setItem("admin_auth", backup.adminAuth);
+      localStorage.removeItem("admin_backup");
+      navigate("/admin/dashboard");
+      window.location.reload();
+    } catch {
+      navigate("/admin");
+    }
+  };
+
   const loadCachedEmails = async () => {
     try {
       const cfUrl = getCloudflareWorkerUrl();
+      const token = getSessionToken();
       let res: Response;
       if (cfUrl) {
-        // Use Cloudflare Worker (zero Supabase egress)
-        res = await fetch(`${cfUrl}/api/emails`);
+        const headers: Record<string, string> = {};
+        if (token) headers["X-Session-Token"] = token;
+        res = await fetch(`${cfUrl}/api/emails`, { headers });
       } else {
-        // Fallback to Supabase directly
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        };
+        if (token) headers["X-Session-Token"] = token;
         res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${getApiKey()}`,
-            "apikey": getApiKey(),
-          },
-          body: JSON.stringify({ mode: "cache" }),
+          method: "POST", headers, body: JSON.stringify({ mode: "cache" }),
         });
       }
       const raw = await res.text();
@@ -1320,33 +1481,31 @@ function EmailViewer() {
     }
   };
 
-  // Sync from IMAP server (background, silent)
   const syncFromImap = async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setSyncing(true);
     try {
       const cfUrl = getCloudflareWorkerUrl();
+      const token = getSessionToken();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 50000);
-      
+
       if (cfUrl) {
-        // Use Cloudflare Worker to trigger sync
+        const headers: Record<string, string> = {};
+        if (token) headers["X-Session-Token"] = token;
         await fetch(`${cfUrl}/api/emails/sync`, {
-          method: "POST",
-          signal: controller.signal,
+          method: "POST", signal: controller.signal, headers,
         });
       } else {
-        // Fallback to Supabase directly
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${getApiKey()}`,
+          "apikey": getApiKey(),
+        };
+        if (token) headers["X-Session-Token"] = token;
         const res = await fetch(`${getApiBase()}/functions/v1/fetch-emails`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${getApiKey()}`,
-            "apikey": getApiKey(),
-          },
-          body: JSON.stringify({ mode: "sync" }),
-          signal: controller.signal,
+          method: "POST", headers, body: JSON.stringify({ mode: "sync" }), signal: controller.signal,
         });
         const raw = await res.text();
         let data: any = null;
@@ -1357,7 +1516,6 @@ function EmailViewer() {
         }
       }
       clearTimeout(timeout);
-      // After sync, reload from cache
       await loadCachedEmails();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -1371,26 +1529,20 @@ function EmailViewer() {
     }
   };
 
-
-
-  // Manual refresh: instant cache load + background IMAP sync
   const fetchEmails = async () => {
     setError(null);
     await loadCachedEmails();
     setCountdown(refreshIntervalSeconds);
-    // Trigger IMAP sync silently in background
     syncFromImap();
   };
 
   useEffect(() => {
-    // On mount: load cache instantly, then do ONE IMAP sync
     setLoading(true);
     loadCachedEmails().then(() => {
       setLoading(false);
-      syncFromImap(); // One-time sync on mount
+      syncFromImap();
     });
 
-    // Auto-refresh from cache every 10s via Cloudflare Worker (free, instant)
     const cacheInterval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
@@ -1400,9 +1552,6 @@ function EmailViewer() {
         return prev - 1;
       });
     }, 1000);
-
-    // NO more IMAP sync interval — Cloudflare Worker handles Supabase DB refresh
-    // IMAP sync only happens on manual refresh button click
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -1442,19 +1591,32 @@ function EmailViewer() {
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {isImpersonating && (
+              <button onClick={backToAdmin}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 text-white rounded-full text-xs font-bold hover:bg-amber-600 transition-all active:scale-95">
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Back to Admin</span>
+                <span className="sm:hidden">Admin</span>
+              </button>
+            )}
             <button onClick={() => fetchEmails()}
               disabled={syncing}
               className="flex items-center p-2.5 sm:px-4 sm:py-2 bg-slate-900 text-white rounded-full text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-60">
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline ml-1.5">Refresh</span>
             </button>
-            <button onClick={() => setShowChangePassword(true)}
-              className="flex items-center p-2.5 sm:px-3 sm:py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-full text-sm font-bold hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95 shadow-md shadow-purple-200"
-              title="Change Password">
-              <Key className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="hidden sm:inline ml-1.5">Password</span>
-            </button>
-            <button onClick={() => { localStorage.clear(); navigate("/"); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            {!isImpersonating && (
+              <button onClick={() => setShowChangePassword(true)}
+                className="flex items-center p-2.5 sm:px-3 sm:py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-full text-sm font-bold hover:from-violet-600 hover:to-purple-700 transition-all active:scale-95 shadow-md shadow-purple-200"
+                title="Change Password">
+                <Key className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline ml-1.5">Password</span>
+              </button>
+            )}
+            <button onClick={() => {
+              if (isImpersonating) { backToAdmin(); return; }
+              localStorage.clear(); navigate("/");
+            }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
               <LogOut className="w-5 h-5 text-slate-400" />
             </button>
           </div>
@@ -1628,7 +1790,6 @@ import { QRCodeSVG } from "qrcode.react";
 // ==================== MAIN APP ====================
 export default function App() {
   useEffect(() => {
-    // Anti-inspect: block right-click and keyboard shortcuts only
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
     document.addEventListener("contextmenu", handleContextMenu);
 
@@ -1639,7 +1800,6 @@ export default function App() {
     };
     document.addEventListener("keydown", handleKeyDown);
 
-    // Disable text selection & drag (prevent copy-paste of content)
     document.body.style.userSelect = "none";
     (document.body.style as any).webkitUserSelect = "none";
     const preventSelect = (e: Event) => e.preventDefault();
@@ -1676,5 +1836,7 @@ const ProtectedRoute = ({ children, role }: { children: React.ReactNode; role: "
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" /></div>;
   if (!user) return <Navigate to={role === "admin" ? "/admin" : "/"} />;
   if (role === "admin" && user.role !== "admin") return <Navigate to="/" />;
+  // Allow admin impersonation: if admin_backup exists, allow user role access
+  if (role === "user" && user.role === "admin" && !localStorage.getItem("admin_backup")) return <Navigate to="/admin/dashboard" />;
   return <>{children}</>;
 };
