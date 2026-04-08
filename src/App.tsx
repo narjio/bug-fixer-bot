@@ -1200,16 +1200,47 @@ function AdminPanel() {
               </h2>
 
               {/* Primary Account (from Settings) */}
-              <div className="p-4 bg-green-50 rounded-2xl border border-green-100 mb-3">
+              <div
+                className={`p-4 rounded-2xl border mb-3 cursor-pointer transition-all ${expandedAccount === -1 ? "bg-green-100 border-green-300 shadow-md" : "bg-green-50 border-green-100 hover:border-green-200"}`}
+                onClick={() => setExpandedAccount(expandedAccount === -1 ? null : -1)}
+              >
                 <div className="flex items-center gap-3">
                   <div className="bg-green-200 p-2 rounded-xl">
                     <Server className="w-4 h-4 text-green-700" />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className="font-bold text-sm text-green-900">Primary</p>
                     <p className="text-xs text-green-700">{serverConfig.IMAP_USER || "Configure in Settings tab"} • {serverConfig.IMAP_HOST || "imap.gmail.com"}:{serverConfig.IMAP_PORT || "993"}</p>
                   </div>
+                  <Eye className={`w-4 h-4 transition-transform ${expandedAccount === -1 ? "text-green-700" : "text-green-400"}`} />
                 </div>
+                {expandedAccount === -1 && (
+                  <div className="mt-4 pt-3 border-t border-green-200 space-y-2">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold text-green-600 uppercase">Host</p>
+                        <p className="text-sm text-green-900 font-medium">{serverConfig.IMAP_HOST || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-green-600 uppercase">Port</p>
+                        <p className="text-sm text-green-900 font-medium">{serverConfig.IMAP_PORT || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-green-600 uppercase">Email</p>
+                        <p className="text-sm text-green-900 font-medium">{serverConfig.IMAP_USER || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-green-600 uppercase">Password</p>
+                        <p className="text-sm text-green-900 font-medium">{serverConfig.IMAP_PASSWORD ? "••••••••" : "Not set"}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-green-600 uppercase">Cloudflare Worker</p>
+                      <p className="text-sm text-green-900 font-medium break-all">Default (built-in)</p>
+                    </div>
+                    <p className="text-[10px] text-green-500 italic mt-1">⚙️ Edit this in the Settings tab</p>
+                  </div>
+                )}
               </div>
 
               {emailAccounts.length === 0 ? (
@@ -1219,22 +1250,58 @@ function AdminPanel() {
               ) : (
                 <div className="space-y-3">
                   {emailAccounts.map((acc, i) => (
-                    <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div
+                      key={i}
+                      className={`p-4 rounded-2xl border cursor-pointer transition-all ${expandedAccount === i ? "bg-blue-50 border-blue-200 shadow-md" : "bg-slate-50 border-slate-100 hover:border-slate-200"}`}
+                      onClick={() => setExpandedAccount(expandedAccount === i ? null : i)}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="bg-blue-100 p-2 rounded-xl">
+                          <div className={`p-2 rounded-xl ${expandedAccount === i ? "bg-blue-200" : "bg-blue-100"}`}>
                             <Server className="w-4 h-4 text-blue-600" />
                           </div>
                           <div>
                             <p className="font-bold text-sm text-slate-900">{acc.label}</p>
                             <p className="text-xs text-slate-500">{acc.user} • {acc.host}:{acc.port}</p>
-                            {acc.cloudflareUrl && <p className="text-[10px] text-slate-400 mt-0.5">CF: {acc.cloudflareUrl.substring(0, 40)}...</p>}
                           </div>
                         </div>
-                        <button onClick={() => removeEmailAccount(i)} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <Eye className={`w-4 h-4 transition-transform ${expandedAccount === i ? "text-blue-600" : "text-slate-400"}`} />
+                          <button onClick={(e) => { e.stopPropagation(); removeEmailAccount(i); }} className="p-2 hover:bg-red-50 text-red-400 hover:text-red-600 rounded-lg transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
+                      {expandedAccount === i && (
+                        <div className="mt-4 pt-3 border-t border-blue-200 space-y-2">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <p className="text-[10px] font-bold text-blue-500 uppercase">Host</p>
+                              <p className="text-sm text-slate-800 font-medium">{acc.host}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold text-blue-500 uppercase">Port</p>
+                              <p className="text-sm text-slate-800 font-medium">{acc.port}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold text-blue-500 uppercase">Email</p>
+                              <p className="text-sm text-slate-800 font-medium">{acc.user}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold text-blue-500 uppercase">Password</p>
+                              <p className="text-sm text-slate-800 font-medium">{acc.password ? "••••••••" : "Not set"}</p>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-blue-500 uppercase">Cloudflare Worker URL</p>
+                            <p className="text-sm text-slate-800 font-medium break-all">{acc.cloudflareUrl || "Default (built-in)"}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-blue-500 uppercase">Label</p>
+                            <p className="text-sm text-slate-800 font-medium">{acc.label}</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
