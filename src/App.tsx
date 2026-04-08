@@ -1857,15 +1857,28 @@ function EmailViewer() {
             </section>
 
             <section className="mt-4 flex-1 overflow-y-auto min-h-0 flex flex-col">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-2">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                   Inbox
                   <span className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 rounded-full">{emails.length}</span>
                 </h3>
+                {syncing && <span className="text-[10px] text-blue-500 font-bold animate-pulse">Syncing...</span>}
               </div>
 
+              {stale && !error && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-2 mb-2">
+                  <p className="text-amber-600 text-[10px] flex items-center gap-1"><Clock className="w-3 h-3" />Showing cached data • Last updated {lastUpdated.toLocaleTimeString()}</p>
+                </div>
+              )}
+
+              {hiddenCount !== 0 && (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-2 mb-2">
+                  <p className="text-blue-600 text-[10px] flex items-center gap-1"><Filter className="w-3 h-3" />Some emails hidden by filters (sign-in codes / password resets). Change in Admin → Security.</p>
+                </div>
+              )}
+
               {error && (
-                <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-4">
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3 mb-2">
                   <p className="text-red-600 text-xs flex items-center gap-2"><AlertCircle className="w-3 h-3" />{error}</p>
                 </div>
               )}
