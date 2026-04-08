@@ -150,14 +150,26 @@ async function handleSync(env, session) {
       "apikey": env.SUPABASE_KEY,
     };
     if (session) {
-      headers["X-Session-Token"] = JSON.stringify(session); // Pass session info
+      headers["X-Session-Token"] = JSON.stringify(session);
     }
 
     const res = await fetch(`${env.SUPABASE_URL}/functions/v1/fetch-emails`, {
       method: "POST", headers, body: JSON.stringify({ mode: "sync" }),
     });
 
-    await res.text();
+    const responseText = await res.text();
+
+    if (!res.ok) {
+      // Pass through real upstream error
+      let errorMsg = "Sync failed";
+      try {
+        const parsed = JSON.parse(responseText);
+        errorMsg = parsed?.error || errorMsg;
+      } catch {}
+      return new Response(JSON.stringify({ success: false, error: errorMsg }), {
+        status: res.status, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
 
     if (env.EMAIL_CACHE) {
       const userAccountsKey = session?.assignedAccounts ? JSON.stringify(session.assignedAccounts.sort()) : "all";
@@ -168,8 +180,8 @@ async function handleSync(env, session) {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ success: false, error: err.message }), {
-      status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ success: false, error: err.message || "Sync request failed" }), {
+      status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 }

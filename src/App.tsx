@@ -872,8 +872,8 @@ function AdminPanel() {
     try {
       await apiCall("manage-app", { action: "set_settings", key: "email_accounts", value: updated });
       toast.success("Account removed!");
-    } catch {
-      toast.error("Failed to remove account");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove account");
     }
   };
 
