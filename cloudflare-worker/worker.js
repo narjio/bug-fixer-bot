@@ -20,7 +20,7 @@ const CORS_HEADERS = {
 
 const CACHE_KEY = "emails_list";
 const CACHE_TIMESTAMP_KEY = "emails_timestamp";
-const STALE_SECONDS = 10;
+const STALE_SECONDS = 3;
 
 async function verifySessionToken(token, secret) {
   try {
@@ -35,6 +35,41 @@ async function verifySessionToken(token, secret) {
     if (payload.exp && Date.now() > payload.exp) return null;
     return payload;
   } catch { return null; }
+}
+
+function parseEmailList(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.emails)) return parsed.emails;
+    return [];
+  } catch {
+    return null;
+  }
+}
+
+function mergeEmailPayloads(existingRaw, incomingRaw) {
+  if (!existingRaw) return null;
+  const existingEmails = parseEmailList(existingRaw);
+  const incomingEmails = parseEmailList(incomingRaw);
+
+  if (!existingEmails || !incomingEmails) {
+    return null;
+  }
+
+  const emailMap = new Map();
+  for (const email of [...incomingEmails, ...existingEmails]) {
+    if (email?.id) {
+      emailMap.set(email.id, email);
+    }
+  }
+
+  return JSON.stringify(
+    Array.from(emailMap.values()).sort(
+      (a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime()
+    )
+  );
 }
 
 
@@ -151,7 +186,19 @@ async function handleSync(env, session, rawToken) {
 
     if (env.EMAIL_CACHE) {
       const userAccountsKey = session?.assignedAccounts ? JSON.stringify(session.assignedAccounts.sort()) : "all";
-      await refreshFromSupabase(env, session, rawToken, `${CACHE_KEY}:${userAccountsKey}`, `${CACHE_TIMESTAMP_KEY}:${userAccountsKey}`);
+      const cacheKey = `${CACHE_KEY}:${userAccountsKey}`;
+      const tsKey = `${CACHE_TIMESTAMP_KEY}:${userAccountsKey}`;
+      const existingCached = await env.EMAIL_CACHE.get(cacheKey);
+      const mergedPayload = mergeEmailPayloads(existingCached, responseText);
+
+      if (mergedPayload) {
+        await Promise.all([
+          env.EMAIL_CACHE.put(cacheKey, mergedPayload),
+          env.EMAIL_CACHE.put(tsKey, Date.now().toString()),
+        ]);
+      } else {
+        await refreshFromSupabase(env, session, rawToken, cacheKey, tsKey);
+      }
     }
 
     return new Response(responseText, {
