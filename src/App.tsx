@@ -665,7 +665,7 @@ function AdminPanel() {
         if (recaptcha.value) {
           setSiteKey(recaptcha.value.siteKey || "");
           setSecretKeyVal(recaptcha.value.secretKey || "");
-          setCaptchaEnabled(!!(recaptcha.value.siteKey));
+          setCaptchaEnabled(recaptcha.value.enabled === true);
         }
       } catch {}
 
