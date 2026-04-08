@@ -818,23 +818,25 @@ function AdminPanel() {
     }
   };
 
-  const loginAsUser = async (user: UserData) => {
+  const loginAsUser = async (targetUser: UserData) => {
     try {
+      // Get impersonation token from backend FIRST
+      const data = await apiCall("manage-app", { action: "impersonate", target_user_id: targetUser.id });
+
       // Store admin session backup
       const adminUser = localStorage.getItem("user");
       const adminToken = localStorage.getItem("session_token");
       const adminAuth = localStorage.getItem("admin_auth");
       localStorage.setItem("admin_backup", JSON.stringify({ user: adminUser, token: adminToken, adminAuth }));
 
-      // Get impersonation token from backend
-      const data = await apiCall("manage-app", { action: "impersonate", target_user_id: user.id });
-
+      // Set impersonated user state
       localStorage.setItem("user", JSON.stringify(data.user));
       if (data.sessionToken) localStorage.setItem("session_token", data.sessionToken);
       localStorage.removeItem("admin_auth");
-      checkAuth();
-      navigate("/viewer");
-      toast.success(`Viewing as ${user.name}`);
+
+      // Navigate atomically — use window.location to avoid route guard race
+      toast.success(`Viewing as ${targetUser.name}`);
+      window.location.href = "/viewer";
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to impersonate user");
     }
