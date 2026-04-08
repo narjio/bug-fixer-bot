@@ -2,7 +2,6 @@
  * Cloudflare Worker — Email Cache Proxy (Security Hardened)
  * 
  * - Validates session tokens (HMAC-SHA256)
- * - Rate limits requests per IP
  * - Passes user's assigned accounts to backend
  * - Forwards real errors instead of masking them
  * 
@@ -22,8 +21,6 @@ const CORS_HEADERS = {
 const CACHE_KEY = "emails_list";
 const CACHE_TIMESTAMP_KEY = "emails_timestamp";
 const STALE_SECONDS = 10;
-const RATE_LIMIT_MAX = 30;
-const RATE_LIMIT_WINDOW = 60;
 
 async function verifySessionToken(token, secret) {
   try {
@@ -40,19 +37,6 @@ async function verifySessionToken(token, secret) {
   } catch { return null; }
 }
 
-async function checkRateLimit(env, ip) {
-  if (!env.EMAIL_CACHE) return true;
-  const key = `rate:${ip}`;
-  const current = await env.EMAIL_CACHE.get(key);
-  const count = current ? parseInt(current) : 0;
-  if (count >= RATE_LIMIT_MAX) return false;
-  await env.EMAIL_CACHE.put(key, (count + 1).toString(), { expirationTtl: RATE_LIMIT_WINDOW });
-  return true;
-}
-
-function getClientIp(request) {
-  return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 export default {
   async fetch(request, env) {
@@ -61,15 +45,6 @@ export default {
     }
 
     const url = new URL(request.url);
-    const ip = getClientIp(request);
-
-    const allowed = await checkRateLimit(env, ip);
-    if (!allowed) {
-      return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again later." }), {
-        status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      });
-    }
-
     // Get the raw session token from the request header (forward as-is)
     const sessionToken = request.headers.get("X-Session-Token") || request.headers.get("x-session-token");
     let session = null;
