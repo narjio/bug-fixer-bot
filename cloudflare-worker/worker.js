@@ -45,15 +45,6 @@ export default {
     }
 
     const url = new URL(request.url);
-    const ip = getClientIp(request);
-
-    const allowed = await checkRateLimit(env, ip);
-    if (!allowed) {
-      return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again later." }), {
-        status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      });
-    }
-
     // Get the raw session token from the request header (forward as-is)
     const sessionToken = request.headers.get("X-Session-Token") || request.headers.get("x-session-token");
     let session = null;
