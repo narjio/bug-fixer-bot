@@ -69,11 +69,22 @@ async function startServer() {
 
   // Proxy: Manage app (users, settings, otps)
   app.post("/api/manage-app", async (req, res) => {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      return res.status(500).json({ success: false, error: "Server not configured." });
+    }
     try {
-      const data = await callEdgeFunction("manage-app", req.body);
-      res.json(data);
+      const upstream = await fetch(`${SUPABASE_URL}/functions/v1/manage-app`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+        },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.text();
+      res.status(upstream.status).set("Content-Type", "application/json").send(data);
     } catch (err) {
-      res.status(500).json({ success: false, error: "Request failed" });
+      res.status(502).json({ success: false, error: "Cannot reach backend." });
     }
   });
 
