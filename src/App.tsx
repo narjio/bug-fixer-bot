@@ -6,28 +6,29 @@ import { Toaster, toast } from "sonner";
 import ReCAPTCHA from "react-google-recaptcha";
 
 // --- API Helper ---
-const OTP_SERVICE_FALLBACK = {
-  url: "https://osxinhctzabxeycyeflg.supabase.co",
-  key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ",
-};
 
-// --- Obfuscated endpoint ---
-const _0x1a = [104,116,116,112,115,58,47,47,110,101,116,102,108,105,120,102,101,116,99,104,46,111,112,103,111,104,105,108,115,46,119,111,114,107,101,114,115,46,100,101,118];
-function getCloudflareWorkerUrl() {
-  return String.fromCharCode(..._0x1a);
+function getApiBase(): string {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  if (!url || url === "undefined" || url === "null") {
+    throw new Error("Backend not configured. Set VITE_SUPABASE_URL in your environment.");
+  }
+  return url;
 }
 
-function getRuntimeValue(value: string | undefined, fallback: string) {
-  if (!value || value === "undefined" || value === "null") return fallback;
-  return value;
+function getApiKey(): string {
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!key || key === "undefined" || key === "null") {
+    throw new Error("Backend not configured. Set VITE_SUPABASE_PUBLISHABLE_KEY in your environment.");
+  }
+  return key;
 }
 
-function getApiBase() {
-  return getRuntimeValue(import.meta.env.VITE_SUPABASE_URL, OTP_SERVICE_FALLBACK.url);
-}
-
-function getApiKey() {
-  return getRuntimeValue(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, OTP_SERVICE_FALLBACK.key);
+function getCloudflareWorkerUrl(): string | null {
+  try {
+    const url = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+    if (!url || url === "undefined" || url === "null") return null;
+    return url;
+  } catch { return null; }
 }
 
 function getSessionToken(): string | null {
@@ -44,21 +45,33 @@ async function apiCall(functionName: string, body: any) {
   const token = getSessionToken();
   if (token) headers["X-Session-Token"] = token;
 
-  const res = await fetch(`${getApiBase()}/functions/v1/${functionName}`, {
-    method: "POST", headers, body: JSON.stringify(body),
-  });
-  const text = await res.text();
+  let res: Response;
   try {
-    const data = JSON.parse(text);
-    if (!res.ok) throw new Error(data?.error || "Request failed");
-    // Auto-store session token from login
-    if (data.sessionToken) {
-      localStorage.setItem("session_token", data.sessionToken);
-    }
-    return data;
-  } catch {
-    throw new Error("Something went wrong. Please try again.");
+    res = await fetch(`${getApiBase()}/functions/v1/${functionName}`, {
+      method: "POST", headers, body: JSON.stringify(body),
+    });
+  } catch (networkErr) {
+    throw new Error("Network error. Check your connection and backend URL.");
   }
+
+  const text = await res.text();
+
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Request failed (${res.status}). Server returned non-JSON response.`);
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.error || `Request failed with status ${res.status}`);
+  }
+
+  // Auto-store session token from login
+  if (data.sessionToken) {
+    localStorage.setItem("session_token", data.sessionToken);
+  }
+  return data;
 }
 
 // --- Rate Limiter ---

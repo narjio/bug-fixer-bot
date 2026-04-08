@@ -7,8 +7,12 @@ import fetch from "node-fetch";
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://osxinhctzabxeycyeflg.supabase.co";
-const SUPABASE_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zeGluaGN0emFieGV5Y3llZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjY1MTUsImV4cCI6MjA5MTE0MjUxNX0.0_8_c1rxRXVOFUzC2aLjoRubLViSVo1qgeNvkbBMvFQ";
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error("FATAL: VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be set in environment.");
+}
 
 async function callEdgeFunction(functionName: string, body: any) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
