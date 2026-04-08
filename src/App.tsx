@@ -357,7 +357,7 @@ function AdminLoginPage() {
     (async () => {
       try {
         const data = await apiCall("manage-app", { action: "get_settings", key: "recaptcha" });
-        if (data.value?.siteKey) setSiteKey(data.value.siteKey);
+        if (data.value?.enabled === true && data.value?.siteKey) setSiteKey(data.value.siteKey);
       } catch {}
     })();
   }, []);
