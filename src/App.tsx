@@ -1511,24 +1511,36 @@ function EmailViewer() {
   const isImpersonating = !!localStorage.getItem("admin_backup");
 
   const [syncing, setSyncing] = useState(false);
+  const [resolvedWorkerUrl, setResolvedWorkerUrl] = useState<string | null>(null);
+  const workerUrlLoaded = React.useRef(false);
 
-  const backToAdmin = () => {
-    try {
-      const backup = JSON.parse(localStorage.getItem("admin_backup") || "{}");
-      if (backup.user) localStorage.setItem("user", backup.user);
-      if (backup.token) localStorage.setItem("session_token", backup.token);
-      if (backup.adminAuth) localStorage.setItem("admin_auth", backup.adminAuth);
-      localStorage.removeItem("admin_backup");
-      navigate("/admin/dashboard");
-      window.location.reload();
-    } catch {
-      navigate("/admin");
-    }
-  };
+  // Load dynamic worker URL from DB settings on mount
+  useEffect(() => {
+    if (workerUrlLoaded.current) return;
+    workerUrlLoaded.current = true;
+    (async () => {
+      try {
+        const data = await apiCall("manage-app", { action: "get_settings", key: "email_accounts" });
+        if (data.value && Array.isArray(data.value)) {
+          const firstWithUrl = data.value.find((acc: any) => acc.cloudflareUrl && acc.cloudflareUrl.trim());
+          if (firstWithUrl) {
+            setResolvedWorkerUrl(firstWithUrl.cloudflareUrl.trim().replace(/\/+$/, ""));
+            return;
+          }
+        }
+      } catch {}
+      // Fallback to env var
+      setResolvedWorkerUrl(getCloudflareWorkerUrl());
+    })();
+  }, []);
+
+  const getWorkerUrl = useCallback(() => {
+    return resolvedWorkerUrl;
+  }, [resolvedWorkerUrl]);
 
   const loadCachedEmails = async () => {
     try {
-      const cfUrl = getCloudflareWorkerUrl();
+      const cfUrl = getWorkerUrl();
       const token = getSessionToken();
       let res: Response;
       if (cfUrl) {
@@ -1549,12 +1561,22 @@ function EmailViewer() {
       const raw = await res.text();
       let data: any = null;
       if (raw) { try { data = JSON.parse(raw); } catch {} }
+
+      if (!res.ok) {
+        const errMsg = data?.error || `Failed to load emails (${res.status})`;
+        setError(errMsg);
+        return 0;
+      }
+
       const emailList = (Array.isArray(data) ? data : []) as Email[];
       emailList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setEmails(emailList);
+      setError(null);
       setLastUpdated(new Date());
       return emailList.length;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load emails";
+      setError(msg);
       console.error("[loadCached] Error:", err);
       return 0;
     }
