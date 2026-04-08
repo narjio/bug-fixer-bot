@@ -201,7 +201,7 @@ function ProfileSelectPage() {
           apiCall("manage-app", { action: "get_settings", key: "recaptcha" }).catch(() => ({ value: null })),
         ]);
         setProfiles((usersData.users || []).filter((u: UserData) => u.role === "user"));
-        if (recaptchaData.value?.siteKey) setSiteKey(recaptchaData.value.siteKey);
+        if (recaptchaData.value?.enabled === true && recaptchaData.value?.siteKey) setSiteKey(recaptchaData.value.siteKey);
       } catch (err) {
         console.error("Failed to load profiles:", err);
       } finally {
