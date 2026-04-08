@@ -1514,6 +1514,20 @@ function EmailViewer() {
   const [resolvedWorkerUrl, setResolvedWorkerUrl] = useState<string | null>(null);
   const workerUrlLoaded = React.useRef(false);
 
+  const backToAdmin = () => {
+    try {
+      const backup = JSON.parse(localStorage.getItem("admin_backup") || "{}");
+      if (backup.user) localStorage.setItem("user", backup.user);
+      if (backup.token) localStorage.setItem("session_token", backup.token);
+      if (backup.adminAuth) localStorage.setItem("admin_auth", backup.adminAuth);
+      localStorage.removeItem("admin_backup");
+      navigate("/admin/dashboard");
+      window.location.reload();
+    } catch {
+      navigate("/admin");
+    }
+  };
+
   // Load dynamic worker URL from DB settings on mount
   useEffect(() => {
     if (workerUrlLoaded.current) return;
